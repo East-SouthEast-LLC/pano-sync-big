@@ -1,75 +1,29 @@
 // src/lib/fileUtils.js
 import Papa from 'papaparse';
 import JSZip from 'jszip';
+import proj4 from 'proj4';
+import { PROJECTIONS } from './projections';
 
-// ── EPSG:6491 → WGS84 conversion (Massachusetts State Plane, US Survey Feet)
-const EPSG6491 = {
-  a: 6378137.0,
-  f: 1 / 298.257222101,
-  k0: 0.9999666667,
-  lon0: -71.5 * Math.PI / 180,
-  lat0: 41.0 * Math.PI / 180,
-  fe: 200000.0 * 0.3048006096012192,
-  fn: 750000.0 * 0.3048006096012192,
-  ftToM: 0.3048006096012192,
+// Register all projection definitions with proj4
+PROJECTIONS.forEach(p => {
+  if (p.proj4def) {
+    proj4.defs(p.code, p.proj4def);
+  }
+});
+
+/**
+ * Converts a projected coordinate pair to WGS84 [lon, lat].
+ * If projCode is EPSG:4326, returns x/y as-is (already lon/lat).
+ */
+export const projectToWgs84 = (x, y, projCode) => {
+  if (projCode === 'EPSG:4326') {
+    return { lon: x, lat: y };
+  }
+  const [lon, lat] = proj4(projCode, 'EPSG:4326', [x, y]);
+  return { lon, lat };
 };
 
-function spcsToLatLon(xFt, yFt) {
-  const { a, f, k0, lon0, lat0, fe, fn, ftToM } = EPSG6491;
-
-  const x = xFt * ftToM - fe;
-  const y = yFt * ftToM - fn;
-
-  const b = a * (1 - f);
-  const e2 = 2 * f - f * f;
-  const e = Math.sqrt(e2);
-  const ep2 = e2 / (1 - e2);
-
-  const n = (a - b) / (a + b);
-  const M0 = a * (
-    (1 - e2 / 4 - 3 * e2 * e2 / 64 - 5 * e2 * e2 * e2 / 256) * lat0
-    - (3 * e2 / 8 + 3 * e2 * e2 / 32 + 45 * e2 * e2 * e2 / 1024) * Math.sin(2 * lat0)
-    + (15 * e2 * e2 / 256 + 45 * e2 * e2 * e2 / 1024) * Math.sin(4 * lat0)
-    - (35 * e2 * e2 * e2 / 3072) * Math.sin(6 * lat0)
-  );
-
-  const M = M0 + y / k0;
-  const mu = M / (a * (1 - e2 / 4 - 3 * e2 * e2 / 64 - 5 * e2 * e2 * e2 / 256));
-
-  const e1 = (1 - Math.sqrt(1 - e2)) / (1 + Math.sqrt(1 - e2));
-  const phi1 = mu
-    + (3 * e1 / 2 - 27 * e1 * e1 * e1 / 32) * Math.sin(2 * mu)
-    + (21 * e1 * e1 / 16 - 55 * e1 * e1 * e1 * e1 / 32) * Math.sin(4 * mu)
-    + (151 * e1 * e1 * e1 / 96) * Math.sin(6 * mu)
-    + (1097 * e1 * e1 * e1 * e1 / 512) * Math.sin(8 * mu);
-
-  const sinPhi1 = Math.sin(phi1);
-  const N1 = a / Math.sqrt(1 - e2 * sinPhi1 * sinPhi1);
-  const T1 = Math.tan(phi1) * Math.tan(phi1);
-  const C1 = ep2 * Math.cos(phi1) * Math.cos(phi1);
-  const R1 = a * (1 - e2) / Math.pow(1 - e2 * sinPhi1 * sinPhi1, 1.5);
-  const D = x / (N1 * k0);
-  const D2 = D * D;
-
-  const lat = phi1 - (N1 * Math.tan(phi1) / R1) * (
-    D2 / 2
-    - (5 + 3 * T1 + 10 * C1 - 4 * C1 * C1 - 9 * ep2) * D2 * D2 / 24
-    + (61 + 90 * T1 + 298 * C1 + 45 * T1 * T1 - 252 * ep2 - 3 * C1 * C1) * D2 * D2 * D2 / 720
-  );
-
-  const lon = lon0 + (
-    D
-    - (1 + 2 * T1 + C1) * D2 * D / 6
-    + (5 - 2 * C1 + 28 * T1 - 3 * C1 * C1 + 8 * ep2 + 24 * T1 * T1) * D2 * D2 * D / 120
-  ) / Math.cos(phi1);
-
-  return {
-    lat: lat * 180 / Math.PI,
-    lon: lon * 180 / Math.PI,
-  };
-}
-
-// ── Convex hull (Graham scan) on [lon, lat] points
+// ── Convex hull (Graham scan) on [lon, lat] points ───────────────────────────
 function convexHull(points) {
   if (points.length < 3) {
     if (points.length === 0) return [];
@@ -106,7 +60,7 @@ function convexHull(points) {
   return [...lower, ...upper, lower[0]];
 }
 
-// ── Centroid from [lon, lat] points
+// ── Centroid from [lon, lat] points ──────────────────────────────────────────
 function centroid(points) {
   const n = points.length;
   const lon = points.reduce((s, p) => s + p[0], 0) / n;
@@ -132,12 +86,13 @@ export const renameImageFiles = async (imageFiles, prefix) => {
 };
 
 /**
- * Parses a CSV file and converts it to a GeoJSON FeatureCollection
- * where each image point is a GeoJSON Point Feature.
+ * Reads a CSV file and returns raw parsed rows plus a sample coordinate
+ * for projection detection/validation — without doing any conversion yet.
  *
- * Returns { projectGeoJson, wgs84Points }
+ * @param {File} csvFile
+ * @returns {Promise<{ rows: object[], sampleX: number, sampleY: number }>}
  */
-export const convertCsvToGeoJson = (csvFile, prefix, urlMap = new Map()) => {
+export const parseCsvRaw = (csvFile) => {
   return new Promise((resolve, reject) => {
     Papa.parse(csvFile, {
       delimiter: ';',
@@ -146,87 +101,90 @@ export const convertCsvToGeoJson = (csvFile, prefix, urlMap = new Map()) => {
       comments: '#',
       complete: (results) => {
         try {
-          const features = [];
-          const wgs84Points = [];
-
           const col_names = [
             'ID', 'filename', 'timestamp', 'pano_pos_x', 'pano_pos_y', 'pano_pos_z',
             'pano_ori_w', 'pano_ori_x', 'pano_ori_y', 'pano_ori_z'
           ];
 
-          results.data.forEach((rowArray, rowIndex) => {
-            const row = col_names.reduce((obj, key, index) => {
+          const rows = results.data.map(rowArray =>
+            col_names.reduce((obj, key, index) => {
               obj[key] = rowArray[index] ? rowArray[index].trim() : undefined;
               return obj;
-            }, {});
+            }, {})
+          ).filter(row => row.filename);
 
-            if (!row.filename) {
-              console.warn(`Skipping row ${rowIndex + 2} due to missing filename.`);
-              return;
-            }
+          if (rows.length === 0) {
+            return reject(new Error('CSV contains no valid rows.'));
+          }
 
-            const shot_number = String(row.filename).split('-')[0];
-            const key = `${prefix}${shot_number.padStart(5, '0')}.jpg`;
-            const publicUrl = urlMap.get(key) || null;
+          const sampleX = parseFloat(rows[0].pano_pos_x);
+          const sampleY = parseFloat(rows[0].pano_pos_y);
 
-            const x = parseFloat(row.pano_pos_x);
-            const y = parseFloat(row.pano_pos_y);
-
-            const { lat, lon } = spcsToLatLon(x, y);
-            wgs84Points.push([lon, lat]);
-
-            features.push({
-              type: 'Feature',
-              geometry: {
-                type: 'Point',
-                coordinates: [lon, lat],
-              },
-              properties: {
-                id: parseInt(row.ID, 10),
-                key,
-                url: publicUrl,
-                timestamp: parseFloat(row.timestamp),
-                position: {
-                  x,
-                  y,
-                  z: parseFloat(row.pano_pos_z),
-                },
-                orientation: {
-                  w: parseFloat(row.pano_ori_w),
-                  x: parseFloat(row.pano_ori_x),
-                  y: parseFloat(row.pano_ori_y),
-                  z: parseFloat(row.pano_ori_z),
-                },
-              },
-            });
-          });
-
-          const projectGeoJson = {
-            type: 'FeatureCollection',
-            features,
-          };
-
-          resolve({ projectGeoJson, wgs84Points });
-        } catch (error) {
-          reject(error);
+          resolve({ rows, sampleX, sampleY });
+        } catch (err) {
+          reject(err);
         }
       },
-      error: (error) => reject(error),
+      error: (err) => reject(err),
     });
   });
 };
 
 /**
- * Builds a GeoJSON Feature for the master index (pano_index.geojson).
- * Geometry is the convex hull Polygon of all image points.
- * Properties contain all project metadata.
+ * Converts pre-parsed CSV rows into a GeoJSON FeatureCollection,
+ * using the supplied projection code for coordinate conversion.
  *
- * @param {string} folder - e.g. "RIDGEVALE_20250626"
- * @param {number} imageCount - number of images in the project
- * @param {number[][]} wgs84Points - [[lon,lat], ...]
- * @param {object} metadata - { name, town, owner, description }
- * @param {string} publicUrl - R2 base public URL
- * @returns {object} GeoJSON Feature
+ * @param {object[]} rows - from parseCsvRaw
+ * @param {string} prefix - e.g. "RIDGEVALE_20250626_"
+ * @param {string} projCode - e.g. "EPSG:6491"
+ * @param {Map} urlMap - filename → public URL
+ * @returns {{ projectGeoJson: object, wgs84Points: number[][] }}
+ */
+export const buildProjectGeoJson = (rows, prefix, projCode, urlMap = new Map()) => {
+  const features = [];
+  const wgs84Points = [];
+
+  rows.forEach((row) => {
+    const shot_number = String(row.filename).split('-')[0];
+    const key = `${prefix}${shot_number.padStart(5, '0')}.jpg`;
+    const publicUrl = urlMap.get(key) || null;
+
+    const x = parseFloat(row.pano_pos_x);
+    const y = parseFloat(row.pano_pos_y);
+
+    const { lat, lon } = projectToWgs84(x, y, projCode);
+    wgs84Points.push([lon, lat]);
+
+    features.push({
+      type: 'Feature',
+      geometry: {
+        type: 'Point',
+        coordinates: [lon, lat],
+      },
+      properties: {
+        id: parseInt(row.ID, 10),
+        key,
+        url: publicUrl,
+        timestamp: parseFloat(row.timestamp),
+        position: { x, y, z: parseFloat(row.pano_pos_z) },
+        orientation: {
+          w: parseFloat(row.pano_ori_w),
+          x: parseFloat(row.pano_ori_x),
+          y: parseFloat(row.pano_ori_y),
+          z: parseFloat(row.pano_ori_z),
+        },
+      },
+    });
+  });
+
+  return {
+    projectGeoJson: { type: 'FeatureCollection', features },
+    wgs84Points,
+  };
+};
+
+/**
+ * Builds a GeoJSON Feature for the master index (pano_index.geojson).
  */
 export const buildIndexFeature = (folder, imageCount, wgs84Points, metadata, publicUrl) => {
   const hullCoords = convexHull(wgs84Points);
@@ -264,10 +222,6 @@ export const buildIndexFeature = (folder, imageCount, wgs84Points, metadata, pub
 /**
  * Merges a new Feature into an existing GeoJSON FeatureCollection.
  * Replaces any existing feature with the same properties.id.
- *
- * @param {object} existingCollection - GeoJSON FeatureCollection (or empty array fallback)
- * @param {object} newFeature - GeoJSON Feature to add/replace
- * @returns {object} updated GeoJSON FeatureCollection
  */
 export const mergeIndexFeature = (existingCollection, newFeature) => {
   const existing = Array.isArray(existingCollection)
