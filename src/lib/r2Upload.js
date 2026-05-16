@@ -39,9 +39,6 @@ const getSigningKey = async (dateStamp) => {
   return hmac(kService, 'aws4_request');
 };
 
-/**
- * Builds the Authorization header for an S3 PUT request.
- */
 const buildAuthHeader = async (method, objectKey, contentType, bodyHash, amzDate, dateStamp) => {
   const host = `${ACCOUNT_ID}.r2.cloudflarestorage.com`;
   const canonicalUri = `/${BUCKET_NAME}/${objectKey}`;
@@ -110,35 +107,18 @@ export const getPublicUrl = () => PUBLIC_URL;
 // ── Fetch functions ───────────────────────────────────────────────────────────
 
 /**
- * Fetches the current pano_data.json (legacy master) from R2's public URL.
- * Returns an empty object if the file doesn't exist yet.
- */
-export const fetchJsonFromR2 = async () => {
-  const url = `${PUBLIC_URL}/pano_data.json?nocache=${Date.now()}`;
-  const response = await fetch(url);
-  if (response.status === 404) {
-    console.warn('pano_data.json not found in R2 — starting fresh.');
-    return {};
-  }
-  if (!response.ok) {
-    throw new Error(`Failed to fetch pano_data.json: ${response.status}`);
-  }
-  return response.json();
-};
-
-/**
- * Fetches the master project index (pano_index.json) from R2.
- * Returns an empty array if the file doesn't exist yet.
+ * Fetches the master project index (pano_index.geojson) from R2.
+ * Returns an empty FeatureCollection if the file doesn't exist yet.
  */
 export const fetchIndexFromR2 = async () => {
-  const url = `${PUBLIC_URL}/pano_index.json?nocache=${Date.now()}`;
+  const url = `${PUBLIC_URL}/pano_index.geojson?nocache=${Date.now()}`;
   const response = await fetch(url);
   if (response.status === 404) {
-    console.warn('pano_index.json not found in R2 — starting fresh.');
-    return [];
+    console.warn('pano_index.geojson not found in R2 — starting fresh.');
+    return { type: 'FeatureCollection', features: [] };
   }
   if (!response.ok) {
-    throw new Error(`Failed to fetch pano_index.json: ${response.status}`);
+    throw new Error(`Failed to fetch pano_index.geojson: ${response.status}`);
   }
   return response.json();
 };
@@ -171,38 +151,28 @@ export const uploadFilesToR2 = async (files, folder, onProgress) => {
 };
 
 /**
- * Uploads a per-project pano_data.json to FOLDER/pano_data.json in R2.
+ * Uploads a per-project pano_data.geojson to FOLDER/pano_data.geojson in R2.
+ *
  * @param {string} folder - e.g. "RIDGEVALE_20250626"
- * @param {object} projectJson - the project's image entries
+ * @param {object} projectGeoJson - GeoJSON FeatureCollection of image points
  * @returns {Promise<string>} - public URL of the uploaded file
  */
-export const uploadProjectJsonToR2 = async (folder, projectJson) => {
-  const objectKey = `${folder}/pano_data.json`;
-  const body = JSON.stringify(projectJson, null, 2);
-  await uploadToR2(objectKey, body, 'application/json');
+export const uploadProjectGeoJsonToR2 = async (folder, projectGeoJson) => {
+  const objectKey = `${folder}/pano_data.geojson`;
+  const body = JSON.stringify(projectGeoJson, null, 2);
+  await uploadToR2(objectKey, body, 'application/geo+json');
   return `${PUBLIC_URL}/${objectKey}`;
 };
 
 /**
- * Uploads the master project index to pano_index.json at bucket root.
- * @param {object[]} indexData - array of project index entries
+ * Uploads the master project index to pano_index.geojson at bucket root.
+ *
+ * @param {object} featureCollection - GeoJSON FeatureCollection of project hulls
  * @returns {Promise<string>} - public URL of the uploaded file
  */
-export const uploadIndexToR2 = async (indexData) => {
-  const objectKey = 'pano_index.json';
-  const body = JSON.stringify(indexData, null, 2);
-  await uploadToR2(objectKey, body, 'application/json');
-  return `${PUBLIC_URL}/${objectKey}`;
-};
-
-/**
- * Uploads the legacy merged pano_data.json to root (kept during migration).
- * @param {object} jsonData - the full merged JSON object
- * @returns {Promise<string>} - public URL
- */
-export const uploadJsonToR2 = async (jsonData) => {
-  const objectKey = 'pano_data.json';
-  const body = JSON.stringify(jsonData, null, 2);
-  await uploadToR2(objectKey, body, 'application/json');
+export const uploadIndexToR2 = async (featureCollection) => {
+  const objectKey = 'pano_index.geojson';
+  const body = JSON.stringify(featureCollection, null, 2);
+  await uploadToR2(objectKey, body, 'application/geo+json');
   return `${PUBLIC_URL}/${objectKey}`;
 };
