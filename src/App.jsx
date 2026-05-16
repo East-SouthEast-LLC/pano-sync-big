@@ -62,8 +62,7 @@ function App() {
   const [resultUrl, setResultUrl]             = useState(null);
   const [errorMessage, setErrorMessage]       = useState(null);
 
-  // coordCheck shape:
-  // { sampleX, sampleY, projCode, swapXY, valid, wgsPreview, message }
+  // coordCheck shape: { sampleX, sampleY, projCode, swapXY, valid, wgsPreview, message }
   const [coordCheck, setCoordCheck] = useState(null);
 
   const pendingPipelineRef = useRef(null);
@@ -104,7 +103,7 @@ function App() {
     cancelledRef.current = false;
   };
 
-  // ── Build a coord check object ───────────────────────────────────────────
+  // ── Build coord check ────────────────────────────────────────────────────
   const buildCheck = (sampleX, sampleY, code, swapXY) => {
     const easting  = swapXY ? sampleY : sampleX;
     const northing = swapXY ? sampleX : sampleY;
@@ -114,22 +113,21 @@ function App() {
     return { sampleX, sampleY, projCode: code, swapXY, valid: validation.ok, message: validation.message, wgsPreview };
   };
 
-  // ── User clicks "Swap X/Y?" ──────────────────────────────────────────────
-  const handleTrySwap = () => {
+  // ── Toggle switch flipped ────────────────────────────────────────────────
+  const handleSwapToggle = (swapXY) => {
     if (!coordCheck) return;
-    const swapped = buildCheck(coordCheck.sampleX, coordCheck.sampleY, coordCheck.projCode, true);
-    setCoordCheck(swapped);
+    const updated = buildCheck(coordCheck.sampleX, coordCheck.sampleY, coordCheck.projCode, swapXY);
+    setCoordCheck(updated);
   };
 
-  // ── User changes projection in modal dropdown ────────────────────────────
+  // ── Projection changed in modal ──────────────────────────────────────────
   const handleModalProjectionChange = (newCode) => {
     if (!coordCheck) return;
-    // Keep current swap state, re-check with new projection
     const updated = buildCheck(coordCheck.sampleX, coordCheck.sampleY, newCode, coordCheck.swapXY);
     setCoordCheck(updated);
   };
 
-  // ── User clicks Proceed (only available when check is green) ────────────
+  // ── Proceed (only callable when green) ───────────────────────────────────
   const handleProceed = () => {
     if (!coordCheck?.valid || !pendingPipelineRef.current) return;
     const { rows, folder, processingPrefix, imageFiles } = pendingPipelineRef.current;
@@ -197,7 +195,7 @@ function App() {
         throw new Error('Could not find both JPG images and a CSV file.');
       }
 
-      // Step 2: parse CSV + validate coords
+      // Step 2: parse CSV + validate
       setStage(STAGES.VALIDATING);
       const { rows, sampleX, sampleY } = await parseCsvRaw(csvFile);
 
@@ -215,12 +213,10 @@ function App() {
       setCoordCheck(check);
 
       if (!check.valid) {
-        // Pause — user must resolve via Swap or projection change then Proceed
         pendingPipelineRef.current = { rows, folder, processingPrefix, imageFiles };
         return;
       }
 
-      // Green — go straight through
       await runUploadPhase(rows, folder, processingPrefix, imageFiles, resolvedCode, false);
 
     } catch (err) {
@@ -286,7 +282,6 @@ function App() {
     const isPaused    = stage === STAGES.VALIDATING && coordCheck && pendingPipelineRef.current;
     const isActive    = !isDone && !isCancelled && !isError && !isPaused;
 
-    // Coord check panel
     const coordPanel = coordCheck && (() => {
       const { valid, swapXY, sampleX, sampleY, wgsPreview, message, projCode: checkCode } = coordCheck;
 
@@ -298,33 +293,40 @@ function App() {
           <p className="font-semibold mb-1">
             {valid ? '✓ Coordinates verified' : '⚠ Coordinate mismatch'}
           </p>
+
           <p className="text-xs mb-0.5">
             Raw CSV: X={sampleX.toFixed(2)}, Y={sampleY.toFixed(2)}
-            {swapXY && <span className="ml-1 font-medium text-amber-700">(read as Y,X)</span>}
           </p>
           {wgsPreview && (
-            <p className="text-xs mb-1">
+            <p className="text-xs mb-2">
               → {wgsPreview.lat.toFixed(6)}°N, {wgsPreview.lon.toFixed(6)}°E
             </p>
           )}
-          <p className="text-xs mb-2">{message}</p>
+          <p className="text-xs mb-3">{message}</p>
 
-          {/* Controls — only shown when paused */}
+          {/* XY / YX toggle switch */}
           {isPaused && (
-            <div className="flex flex-col gap-2 mt-2">
-              {/* Swap button — only show if not already swapped */}
-              {!swapXY && (
+            <div className="flex flex-col gap-3">
+              <div className="flex items-center gap-3">
+                <span className={`text-xs font-medium ${!swapXY ? 'text-gray-900' : 'text-gray-400'}`}>X,Y</span>
                 <button
-                  onClick={handleTrySwap}
-                  className="w-full px-3 py-1.5 rounded border border-red-400 bg-white text-red-700 text-xs font-medium hover:bg-red-50 transition-colors"
+                  onClick={() => handleSwapToggle(!swapXY)}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${
+                    swapXY ? 'bg-blue-600' : 'bg-gray-300'
+                  }`}
                 >
-                  Swap X/Y?
+                  <span
+                    className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                      swapXY ? 'translate-x-6' : 'translate-x-1'
+                    }`}
+                  />
                 </button>
-              )}
+                <span className={`text-xs font-medium ${swapXY ? 'text-gray-900' : 'text-gray-400'}`}>Y,X</span>
+              </div>
 
               {/* Projection dropdown */}
               <div>
-                <label className="block text-xs font-medium mb-1">Change projection:</label>
+                <label className="block text-xs font-medium mb-1">Projection:</label>
                 <select
                   value={checkCode}
                   onChange={e => handleModalProjectionChange(e.target.value)}
@@ -338,15 +340,14 @@ function App() {
                 </select>
               </div>
 
-              {/* Proceed — only active when green */}
-              <div className="flex gap-2 mt-1">
+              {/* Proceed / Cancel */}
+              <div className="flex gap-2">
                 <button
                   onClick={handleProceed}
                   disabled={!valid}
                   className={`flex-1 px-3 py-1.5 rounded text-white text-xs font-medium transition-colors ${
-                    valid
-                      ? 'bg-green-600 hover:bg-green-700 cursor-pointer'
-                      : 'bg-gray-300 cursor-not-allowed'
+                    valid ? 'bg-green-600 hover:bg-green-700 cursor-pointer'
+                          : 'bg-gray-300 cursor-not-allowed text-gray-500'
                   }`}
                 >
                   Proceed
