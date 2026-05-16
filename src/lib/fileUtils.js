@@ -6,35 +6,38 @@ import { PROJECTIONS } from './projections';
 
 // Register all projection definitions with proj4
 PROJECTIONS.forEach(p => {
-  if (p.proj4def) {
-    proj4.defs(p.code, p.proj4def);
-  }
+  if (p.proj4def) proj4.defs(p.code, p.proj4def);
 });
 
 /**
- * Converts a projected coordinate pair to WGS84 [lon, lat].
- * If projCode is EPSG:4326, returns x/y as-is (already lon/lat).
+ * Converts a projected coordinate pair to WGS84.
+ * @param {number} easting  - the easting value (already resolved for swap)
+ * @param {number} northing - the northing value (already resolved for swap)
+ * @param {string} projCode
+ * @returns {{ lon: number, lat: number }}
  */
-export const projectToWgs84 = (x, y, projCode) => {
+export const projectToWgs84 = (easting, northing, projCode) => {
   if (projCode === 'EPSG:4326') {
-    return { lon: x, lat: y };
+    return { lon: easting, lat: northing };
   }
-  const [lon, lat] = proj4(projCode, 'EPSG:4326', [x, y]);
+  const [lon, lat] = proj4(projCode, 'EPSG:4326', [easting, northing]);
   return { lon, lat };
 };
 
-// ── Convex hull (Graham scan) on [lon, lat] points ───────────────────────────
+// ── Convex hull (Graham scan) ─────────────────────────────────────────────────
 function convexHull(points) {
   if (points.length < 3) {
     if (points.length === 0) return [];
     const lons = points.map(p => p[0]);
     const lats = points.map(p => p[1]);
     const buf = 0.0001;
-    const minLon = Math.min(...lons) - buf;
-    const maxLon = Math.max(...lons) + buf;
-    const minLat = Math.min(...lats) - buf;
-    const maxLat = Math.max(...lats) + buf;
-    return [[minLon, minLat], [maxLon, minLat], [maxLon, maxLat], [minLon, maxLat], [minLon, minLat]];
+    return [
+      [Math.min(...lons) - buf, Math.min(...lats) - buf],
+      [Math.max(...lons) + buf, Math.min(...lats) - buf],
+      [Math.max(...lons) + buf, Math.max(...lats) + buf],
+      [Math.min(...lons) - buf, Math.max(...lats) + buf],
+      [Math.min(...lons) - buf, Math.min(...lats) - buf],
+    ];
   }
 
   const sorted = [...points].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
@@ -47,50 +50,43 @@ function convexHull(points) {
       lower.pop();
     lower.push(p);
   }
-
   const upper = [];
   for (const p of [...sorted].reverse()) {
     while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0)
       upper.pop();
     upper.push(p);
   }
-
   lower.pop();
   upper.pop();
   return [...lower, ...upper, lower[0]];
 }
 
-// ── Centroid from [lon, lat] points ──────────────────────────────────────────
 function centroid(points) {
   const n = points.length;
-  const lon = points.reduce((s, p) => s + p[0], 0) / n;
-  const lat = points.reduce((s, p) => s + p[1], 0) / n;
-  return [lon, lat];
+  return [
+    points.reduce((s, p) => s + p[0], 0) / n,
+    points.reduce((s, p) => s + p[1], 0) / n,
+  ];
 }
 
 /**
  * Renames uploaded image files based on a prefix.
- * Example: 001-pano.jpg -> MYPREFIX_001.jpg
+ * Example: 001-pano.jpg -> MYPREFIX_00001.jpg
  */
 export const renameImageFiles = async (imageFiles, prefix) => {
-  const renamedFiles = imageFiles.map((file) => {
-    const match = file.name.match(/^(\d+)-pano\.jpg$/i);
-    if (match && match[1]) {
-      const originalNumber = match[1].padStart(5, '0');
-      const newName = `${prefix}${originalNumber}.jpg`;
+  return imageFiles
+    .map(file => {
+      const match = file.name.match(/^(\d+)-pano\.jpg$/i);
+      if (!match) return null;
+      const newName = `${prefix}${match[1].padStart(5, '0')}.jpg`;
       return new File([file], newName, { type: file.type });
-    }
-    return null;
-  });
-  return renamedFiles.filter(file => file !== null);
+    })
+    .filter(Boolean);
 };
 
 /**
- * Reads a CSV file and returns raw parsed rows plus a sample coordinate
- * for projection detection/validation — without doing any conversion yet.
- *
- * @param {File} csvFile
- * @returns {Promise<{ rows: object[], sampleX: number, sampleY: number }>}
+ * Reads a CSV file and returns raw parsed rows plus a sample coordinate.
+ * No conversion happens here.
  */
 export const parseCsvRaw = (csvFile) => {
   return new Promise((resolve, reject) => {
@@ -103,27 +99,23 @@ export const parseCsvRaw = (csvFile) => {
         try {
           const col_names = [
             'ID', 'filename', 'timestamp', 'pano_pos_x', 'pano_pos_y', 'pano_pos_z',
-            'pano_ori_w', 'pano_ori_x', 'pano_ori_y', 'pano_ori_z'
+            'pano_ori_w', 'pano_ori_x', 'pano_ori_y', 'pano_ori_z',
           ];
+          const rows = results.data
+            .map(rowArray =>
+              col_names.reduce((obj, key, i) => {
+                obj[key] = rowArray[i] ? rowArray[i].trim() : undefined;
+                return obj;
+              }, {})
+            )
+            .filter(row => row.filename);
 
-          const rows = results.data.map(rowArray =>
-            col_names.reduce((obj, key, index) => {
-              obj[key] = rowArray[index] ? rowArray[index].trim() : undefined;
-              return obj;
-            }, {})
-          ).filter(row => row.filename);
-
-          if (rows.length === 0) {
-            return reject(new Error('CSV contains no valid rows.'));
-          }
+          if (rows.length === 0) return reject(new Error('CSV contains no valid rows.'));
 
           const sampleX = parseFloat(rows[0].pano_pos_x);
           const sampleY = parseFloat(rows[0].pano_pos_y);
-
           resolve({ rows, sampleX, sampleY });
-        } catch (err) {
-          reject(err);
-        }
+        } catch (err) { reject(err); }
       },
       error: (err) => reject(err),
     });
@@ -131,42 +123,46 @@ export const parseCsvRaw = (csvFile) => {
 };
 
 /**
- * Converts pre-parsed CSV rows into a GeoJSON FeatureCollection,
- * using the supplied projection code for coordinate conversion.
+ * Converts pre-parsed CSV rows into a GeoJSON FeatureCollection.
  *
- * @param {object[]} rows - from parseCsvRaw
- * @param {string} prefix - e.g. "RIDGEVALE_20250626_"
- * @param {string} projCode - e.g. "EPSG:6491"
- * @param {Map} urlMap - filename → public URL
- * @returns {{ projectGeoJson: object, wgs84Points: number[][] }}
+ * @param {object[]} rows       - from parseCsvRaw
+ * @param {string}   prefix     - e.g. "RIDGEVALE_20250626_"
+ * @param {string}   projCode   - e.g. "EPSG:6491"
+ * @param {boolean}  swapXY     - if true, treat CSV pano_pos_x as northing and pano_pos_y as easting
+ * @param {Map}      urlMap     - filename → public URL
+ * @returns {{ projectGeoJson, wgs84Points }}
  */
-export const buildProjectGeoJson = (rows, prefix, projCode, urlMap = new Map()) => {
+export const buildProjectGeoJson = (rows, prefix, projCode, swapXY = false, urlMap = new Map()) => {
   const features = [];
   const wgs84Points = [];
 
-  rows.forEach((row) => {
+  rows.forEach(row => {
+    const rawX = parseFloat(row.pano_pos_x);
+    const rawY = parseFloat(row.pano_pos_y);
+
+    // Apply swap: NavVis (and some other systems) output X=northing, Y=easting
+    const easting  = swapXY ? rawY : rawX;
+    const northing = swapXY ? rawX : rawY;
+
+    const { lon, lat } = projectToWgs84(easting, northing, projCode);
+    wgs84Points.push([lon, lat]);
+
     const shot_number = String(row.filename).split('-')[0];
     const key = `${prefix}${shot_number.padStart(5, '0')}.jpg`;
-    const publicUrl = urlMap.get(key) || null;
-
-    const x = parseFloat(row.pano_pos_x);
-    const y = parseFloat(row.pano_pos_y);
-
-    const { lat, lon } = projectToWgs84(x, y, projCode);
-    wgs84Points.push([lon, lat]);
 
     features.push({
       type: 'Feature',
-      geometry: {
-        type: 'Point',
-        coordinates: [lon, lat],
-      },
+      geometry: { type: 'Point', coordinates: [lon, lat] },
       properties: {
         id: parseInt(row.ID, 10),
         key,
-        url: publicUrl,
+        url: urlMap.get(key) || null,
         timestamp: parseFloat(row.timestamp),
-        position: { x, y, z: parseFloat(row.pano_pos_z) },
+        position: {
+          x: rawX,
+          y: rawY,
+          z: parseFloat(row.pano_pos_z),
+        },
         orientation: {
           w: parseFloat(row.pano_ori_w),
           x: parseFloat(row.pano_ori_x),
@@ -188,7 +184,7 @@ export const buildProjectGeoJson = (rows, prefix, projCode, urlMap = new Map()) 
  */
 export const buildIndexFeature = (folder, imageCount, wgs84Points, metadata, publicUrl) => {
   const hullCoords = convexHull(wgs84Points);
-  const center = centroid(wgs84Points);
+  const center     = centroid(wgs84Points);
 
   const dateMatch = folder.match(/(\d{4}-\d{2}-\d{2}|\d{8})$/);
   let date = '';
@@ -201,27 +197,23 @@ export const buildIndexFeature = (folder, imageCount, wgs84Points, metadata, pub
 
   return {
     type: 'Feature',
-    geometry: {
-      type: 'Polygon',
-      coordinates: [hullCoords],
-    },
+    geometry: { type: 'Polygon', coordinates: [hullCoords] },
     properties: {
-      id: folder,
-      name: metadata.name || folder,
-      town: metadata.town || '',
-      owner: metadata.owner || 'ESE LLC',
+      id:          folder,
+      name:        metadata.name        || folder,
+      town:        metadata.town        || '',
+      owner:       metadata.owner       || 'ESE LLC',
       description: metadata.description || '',
       date,
       image_count: imageCount,
-      centroid: center,
-      data_url: `${publicUrl}/${folder}/pano_data.geojson`,
+      centroid:    center,
+      data_url:    `${publicUrl}/${folder}/pano_data.geojson`,
     },
   };
 };
 
 /**
  * Merges a new Feature into an existing GeoJSON FeatureCollection.
- * Replaces any existing feature with the same properties.id.
  */
 export const mergeIndexFeature = (existingCollection, newFeature) => {
   const existing = Array.isArray(existingCollection)
@@ -232,20 +224,14 @@ export const mergeIndexFeature = (existingCollection, newFeature) => {
     f => f.properties?.id !== newFeature.properties.id
   );
 
-  return {
-    type: 'FeatureCollection',
-    features: [...filtered, newFeature],
-  };
+  return { type: 'FeatureCollection', features: [...filtered, newFeature] };
 };
 
 /**
  * Creates a zip archive from an array of files.
  */
-export const createZip = async (files, zipName) => {
+export const createZip = async (files) => {
   const zip = new JSZip();
-  files.forEach((file) => {
-    zip.file(file.name, file);
-  });
-  const blob = await zip.generateAsync({ type: 'blob' });
-  return blob;
+  files.forEach(file => zip.file(file.name, file));
+  return zip.generateAsync({ type: 'blob' });
 };
