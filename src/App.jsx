@@ -26,7 +26,6 @@ import {
   AUTO_DETECT_CODE,
   detectProjection,
   validateCoords,
-  checkBothOrientations,
 } from './lib/projections';
 
 const STAGES = {
@@ -49,7 +48,7 @@ function App() {
   const [indexLoadError, setIndexLoadError] = useState(null);
 
   const [prefix, setPrefix]     = useState('');
-  const [projCode, setProjCode] = useState('');  // blank = prompt shown
+  const [projCode, setProjCode] = useState('');
 
   const [projectName, setProjectName]               = useState('');
   const [projectTown, setProjectTown]               = useState('');
@@ -63,11 +62,10 @@ function App() {
   const [resultUrl, setResultUrl]             = useState(null);
   const [errorMessage, setErrorMessage]       = useState(null);
 
-  // Coord validation state
-  // Shape: { sampleX, sampleY, projCode, swapXY, normalOk, swapOk, wgsPreview, message }
+  // coordCheck shape:
+  // { sampleX, sampleY, projCode, swapXY, valid, wgsPreview, message }
   const [coordCheck, setCoordCheck] = useState(null);
 
-  // Pending pipeline data held while user resolves a mismatch
   const pendingPipelineRef = useRef(null);
   const cancelledRef       = useRef(false);
 
@@ -86,9 +84,7 @@ function App() {
   };
 
   const directCsv    = rawFiles.find(f => f.name.toLowerCase().endsWith('.csv'));
-  const directImages = rawFiles.filter(f =>
-    f.name.toLowerCase().endsWith('.jpg') || f.name.toLowerCase().endsWith('.jpeg')
-  );
+  const directImages = rawFiles.filter(f => f.name.toLowerCase().match(/\.jpe?g$/));
 
   const handleCancel = () => {
     cancelledRef.current = true;
@@ -108,46 +104,34 @@ function App() {
     cancelledRef.current = false;
   };
 
-  // ── Build coord check for a given projCode and optional swap ─────────────
-  const buildCheck = (sampleX, sampleY, code, swapXY = false) => {
-    const { normalOk, swapOk } = checkBothOrientations(sampleX, sampleY, code);
-    const effectiveSwap = swapXY || (!normalOk && swapOk);
-    const easting  = effectiveSwap ? sampleY : sampleX;
-    const northing = effectiveSwap ? sampleX : sampleY;
+  // ── Build a coord check object ───────────────────────────────────────────
+  const buildCheck = (sampleX, sampleY, code, swapXY) => {
+    const easting  = swapXY ? sampleY : sampleX;
+    const northing = swapXY ? sampleX : sampleY;
+    const validation = validateCoords(sampleX, sampleY, code, swapXY);
     let wgsPreview = null;
     try { wgsPreview = projectToWgs84(easting, northing, code); } catch (_) {}
-    const validation = validateCoords(sampleX, sampleY, code, effectiveSwap);
-    return { sampleX, sampleY, projCode: code, swapXY: effectiveSwap, normalOk, swapOk, wgsPreview, valid: validation.ok, message: validation.message };
+    return { sampleX, sampleY, projCode: code, swapXY, valid: validation.ok, message: validation.message, wgsPreview };
   };
 
-  // ── User changes projection in the mismatch modal ────────────────────────
+  // ── User clicks "Swap X/Y?" ──────────────────────────────────────────────
+  const handleTrySwap = () => {
+    if (!coordCheck) return;
+    const swapped = buildCheck(coordCheck.sampleX, coordCheck.sampleY, coordCheck.projCode, true);
+    setCoordCheck(swapped);
+  };
+
+  // ── User changes projection in modal dropdown ────────────────────────────
   const handleModalProjectionChange = (newCode) => {
     if (!coordCheck) return;
-    const updated = buildCheck(coordCheck.sampleX, coordCheck.sampleY, newCode, false);
+    // Keep current swap state, re-check with new projection
+    const updated = buildCheck(coordCheck.sampleX, coordCheck.sampleY, newCode, coordCheck.swapXY);
     setCoordCheck(updated);
-    // If now valid, auto-resume
-    if (updated.valid && pendingPipelineRef.current) {
-      const { rows, folder, processingPrefix, imageFiles } = pendingPipelineRef.current;
-      pendingPipelineRef.current = null;
-      runUploadPhase(rows, folder, processingPrefix, imageFiles, newCode, updated.swapXY);
-    }
   };
 
-  // ── User accepts the swap suggestion ────────────────────────────────────
-  const handleAcceptSwap = () => {
-    if (!coordCheck || !pendingPipelineRef.current) return;
-    const updated = buildCheck(coordCheck.sampleX, coordCheck.sampleY, coordCheck.projCode, true);
-    setCoordCheck(updated);
-    if (updated.valid) {
-      const { rows, folder, processingPrefix, imageFiles } = pendingPipelineRef.current;
-      pendingPipelineRef.current = null;
-      runUploadPhase(rows, folder, processingPrefix, imageFiles, coordCheck.projCode, true);
-    }
-  };
-
-  // ── User forces proceed despite mismatch ────────────────────────────────
-  const handleProceedAnyway = () => {
-    if (!pendingPipelineRef.current) return;
+  // ── User clicks Proceed (only available when check is green) ────────────
+  const handleProceed = () => {
+    if (!coordCheck?.valid || !pendingPipelineRef.current) return;
     const { rows, folder, processingPrefix, imageFiles } = pendingPipelineRef.current;
     pendingPipelineRef.current = null;
     runUploadPhase(rows, folder, processingPrefix, imageFiles, coordCheck.projCode, coordCheck.swapXY);
@@ -189,7 +173,7 @@ function App() {
         const entries = Object.values(zip.files).filter(e => {
           if (e.dir) return false;
           const n = e.name.split('/').pop().toLowerCase();
-          return n.endsWith('.jpg') || n.endsWith('.jpeg') || n.endsWith('.csv');
+          return n.match(/\.jpe?g$/) || n.endsWith('.csv');
         });
         setExtractProgress({ done: 0, total: entries.length });
         const extracted = [];
@@ -220,7 +204,6 @@ function App() {
       const processingPrefix = prefix.endsWith('_') ? prefix : `${prefix}_`;
       const folder           = processingPrefix.replace(/_$/, '');
 
-      // Auto-detect if requested
       let resolvedCode = projCode;
       if (projCode === AUTO_DETECT_CODE) {
         const detected = detectProjection(sampleX, sampleY);
@@ -232,13 +215,13 @@ function App() {
       setCoordCheck(check);
 
       if (!check.valid) {
-        // Pause — let user resolve
+        // Pause — user must resolve via Swap or projection change then Proceed
         pendingPipelineRef.current = { rows, folder, processingPrefix, imageFiles };
         return;
       }
 
-      // Coords good — go
-      await runUploadPhase(rows, folder, processingPrefix, imageFiles, resolvedCode, check.swapXY);
+      // Green — go straight through
+      await runUploadPhase(rows, folder, processingPrefix, imageFiles, resolvedCode, false);
 
     } catch (err) {
       if (!cancelledRef.current) {
@@ -256,23 +239,19 @@ function App() {
       if (renamedImages.length === 0) {
         throw new Error("No images matched the expected naming format '###-pano.jpg'.");
       }
-
       if (cancelledRef.current) return;
 
       setStage(STAGES.UPLOADING);
       setUploadProgress({ done: 0, total: renamedImages.length });
-
       const urlMap = await uploadFilesToR2(
         renamedImages, folder,
         (_, status) => { if (status === 'done') setUploadProgress(p => ({ ...p, done: p.done + 1 })); }
       );
-
       if (cancelledRef.current) return;
 
       setStage(STAGES.GEOJSON);
       const { projectGeoJson, wgs84Points } = buildProjectGeoJson(rows, processingPrefix, resolvedCode, swapXY, urlMap);
       await uploadProjectGeoJsonToR2(folder, projectGeoJson);
-
       if (cancelledRef.current) return;
 
       setStage(STAGES.INDEX);
@@ -283,7 +262,6 @@ function App() {
       const newFeature = buildIndexFeature(folder, projectGeoJson.features.length, wgs84Points, metadata, getPublicUrl());
       const finalIndex = mergeIndexFeature(masterIndex, newFeature);
       const indexUrl   = await uploadIndexToR2(finalIndex);
-
       if (cancelledRef.current) return;
 
       setMasterIndex(finalIndex);
@@ -300,67 +278,88 @@ function App() {
     }
   };
 
-  // ── Modal content ─────────────────────────────────────────────────────────
+  // ── Modal ────────────────────────────────────────────────────────────────
   const renderModalContent = () => {
     const isDone      = stage === STAGES.DONE;
     const isCancelled = stage === STAGES.CANCELLED;
     const isError     = stage === STAGES.ERROR;
-    const isPaused    = stage === STAGES.VALIDATING && coordCheck && !coordCheck.valid && pendingPipelineRef.current;
+    const isPaused    = stage === STAGES.VALIDATING && coordCheck && pendingPipelineRef.current;
     const isActive    = !isDone && !isCancelled && !isError && !isPaused;
 
+    // Coord check panel
     const coordPanel = coordCheck && (() => {
-      const { valid, normalOk, swapOk, swapXY, sampleX, sampleY, wgsPreview, message } = coordCheck;
-      const bgClass = valid
-        ? 'bg-green-50 border-green-300 text-green-800'
-        : 'bg-red-50 border-red-300 text-red-800';
+      const { valid, swapXY, sampleX, sampleY, wgsPreview, message, projCode: checkCode } = coordCheck;
 
       return (
-        <div className={`rounded-md border p-3 text-sm ${bgClass}`}>
+        <div className={`rounded-md border p-3 text-sm ${
+          valid ? 'bg-green-50 border-green-300 text-green-800'
+                : 'bg-red-50 border-red-300 text-red-800'
+        }`}>
           <p className="font-semibold mb-1">
             {valid ? '✓ Coordinates verified' : '⚠ Coordinate mismatch'}
           </p>
-
           <p className="text-xs mb-0.5">
             Raw CSV: X={sampleX.toFixed(2)}, Y={sampleY.toFixed(2)}
-            {swapXY && <span className="ml-1 font-medium">(using as Y,X)</span>}
+            {swapXY && <span className="ml-1 font-medium text-amber-700">(read as Y,X)</span>}
           </p>
-
           {wgsPreview && (
             <p className="text-xs mb-1">
               → {wgsPreview.lat.toFixed(6)}°N, {wgsPreview.lon.toFixed(6)}°E
             </p>
           )}
-
           <p className="text-xs mb-2">{message}</p>
 
-          {/* Swap suggestion */}
-          {!valid && swapOk && !swapXY && (
-            <div className="rounded bg-amber-50 border border-amber-300 p-2 mb-2">
-              <p className="text-xs font-medium text-amber-800 mb-1">
-                💡 Coordinates match if X and Y are swapped (Y,X order — common in NavVis exports).
-              </p>
-              <button
-                onClick={handleAcceptSwap}
-                className="px-3 py-1 rounded bg-amber-600 text-white text-xs hover:bg-amber-700 transition-colors"
-              >
-                Accept swap (use Y,X order)
-              </button>
+          {/* Controls — only shown when paused */}
+          {isPaused && (
+            <div className="flex flex-col gap-2 mt-2">
+              {/* Swap button — only show if not already swapped */}
+              {!swapXY && (
+                <button
+                  onClick={handleTrySwap}
+                  className="w-full px-3 py-1.5 rounded border border-red-400 bg-white text-red-700 text-xs font-medium hover:bg-red-50 transition-colors"
+                >
+                  Swap X/Y?
+                </button>
+              )}
+
+              {/* Projection dropdown */}
+              <div>
+                <label className="block text-xs font-medium mb-1">Change projection:</label>
+                <select
+                  value={checkCode}
+                  onChange={e => handleModalProjectionChange(e.target.value)}
+                  className="w-full px-2 py-1 text-xs border border-gray-300 rounded bg-white text-gray-800"
+                >
+                  {ALL_OPTIONS.filter(p => p.code !== AUTO_DETECT_CODE).map(p => (
+                    <option key={p.code} value={p.code}>
+                      {p.code} — {p.label.split('—')[1]?.trim() ?? p.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Proceed — only active when green */}
+              <div className="flex gap-2 mt-1">
+                <button
+                  onClick={handleProceed}
+                  disabled={!valid}
+                  className={`flex-1 px-3 py-1.5 rounded text-white text-xs font-medium transition-colors ${
+                    valid
+                      ? 'bg-green-600 hover:bg-green-700 cursor-pointer'
+                      : 'bg-gray-300 cursor-not-allowed'
+                  }`}
+                >
+                  Proceed
+                </button>
+                <button
+                  onClick={handleCancel}
+                  className="px-3 py-1.5 rounded border border-gray-300 text-xs text-gray-600 hover:bg-gray-100 transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
             </div>
           )}
-
-          {/* Projection picker */}
-          <div className="mt-1">
-            <label className="block text-xs font-medium mb-1">Change projection:</label>
-            <select
-              value={coordCheck.projCode}
-              onChange={e => handleModalProjectionChange(e.target.value)}
-              className="w-full px-2 py-1 text-xs border border-gray-300 rounded bg-white text-gray-800"
-            >
-              {ALL_OPTIONS.map(p => (
-                <option key={p.code} value={p.code}>{p.code} — {p.label.split('—')[1]?.trim() ?? p.label}</option>
-              ))}
-            </select>
-          </div>
         </div>
       );
     })();
@@ -382,29 +381,6 @@ function App() {
         />
 
         {coordPanel}
-
-        {isPaused && (
-          <div className="rounded-md bg-amber-50 border border-amber-300 p-3 text-sm text-amber-800">
-            <p className="font-semibold mb-1">Pipeline paused</p>
-            <p className="text-xs mb-3">
-              Accept the swap above, change the projection, or proceed anyway with current settings.
-            </p>
-            <div className="flex gap-2">
-              <button
-                onClick={handleProceedAnyway}
-                className="px-3 py-1.5 rounded bg-gray-600 text-white text-xs hover:bg-gray-700 transition-colors"
-              >
-                Proceed anyway
-              </button>
-              <button
-                onClick={handleCancel}
-                className="px-3 py-1.5 rounded border border-gray-300 text-xs text-gray-600 hover:bg-gray-100 transition-colors"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        )}
 
         <ProgressRow
           label="Uploading images to R2"
