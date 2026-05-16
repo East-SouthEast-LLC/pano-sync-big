@@ -3,22 +3,20 @@ import Papa from 'papaparse';
 import JSZip from 'jszip';
 
 // ── EPSG:6491 → WGS84 conversion (Massachusetts State Plane, US Survey Feet)
-// Uses a manual Transverse Mercator formula — no proj4 dependency needed.
 const EPSG6491 = {
-  a: 6378137.0,           // semi-major axis (m)
-  f: 1 / 298.257222101,   // flattening
-  k0: 0.9999666667,       // scale factor
-  lon0: -71.5 * Math.PI / 180, // central meridian
-  lat0: 41.0 * Math.PI / 180,  // latitude of origin
-  fe: 200000.0 * 0.3048006096012192, // false easting (m, converted from US ft)
-  fn: 750000.0 * 0.3048006096012192, // false northing (m, converted from US ft)
-  ftToM: 0.3048006096012192,          // US survey foot to metre
+  a: 6378137.0,
+  f: 1 / 298.257222101,
+  k0: 0.9999666667,
+  lon0: -71.5 * Math.PI / 180,
+  lat0: 41.0 * Math.PI / 180,
+  fe: 200000.0 * 0.3048006096012192,
+  fn: 750000.0 * 0.3048006096012192,
+  ftToM: 0.3048006096012192,
 };
 
 function spcsToLatLon(xFt, yFt) {
   const { a, f, k0, lon0, lat0, fe, fn, ftToM } = EPSG6491;
 
-  // Convert feet to metres
   const x = xFt * ftToM - fe;
   const y = yFt * ftToM - fn;
 
@@ -27,9 +25,7 @@ function spcsToLatLon(xFt, yFt) {
   const e = Math.sqrt(e2);
   const ep2 = e2 / (1 - e2);
 
-  // Meridional arc at origin
   const n = (a - b) / (a + b);
-  const n2 = n * n; const n3 = n2 * n; const n4 = n3 * n;
   const M0 = a * (
     (1 - e2 / 4 - 3 * e2 * e2 / 64 - 5 * e2 * e2 * e2 / 256) * lat0
     - (3 * e2 / 8 + 3 * e2 * e2 / 32 + 45 * e2 * e2 * e2 / 1024) * Math.sin(2 * lat0)
@@ -76,7 +72,6 @@ function spcsToLatLon(xFt, yFt) {
 // ── Convex hull (Graham scan) on [lon, lat] points
 function convexHull(points) {
   if (points.length < 3) {
-    // Return a small buffer around the points for < 3 points
     if (points.length === 0) return [];
     const lons = points.map(p => p[0]);
     const lats = points.map(p => p[1]);
@@ -89,7 +84,6 @@ function convexHull(points) {
   }
 
   const sorted = [...points].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
-
   const cross = (O, A, B) =>
     (A[0] - O[0]) * (B[1] - O[1]) - (A[1] - O[1]) * (B[0] - O[0]);
 
@@ -107,13 +101,12 @@ function convexHull(points) {
     upper.push(p);
   }
 
-  // Remove last point of each half (duplicates first of other half)
   lower.pop();
   upper.pop();
-  return [...lower, ...upper, lower[0]]; // close the ring
+  return [...lower, ...upper, lower[0]];
 }
 
-// ── Build a centroid from an array of [lon, lat] points
+// ── Centroid from [lon, lat] points
 function centroid(points) {
   const n = points.length;
   const lon = points.reduce((s, p) => s + p[0], 0) / n;
@@ -139,11 +132,12 @@ export const renameImageFiles = async (imageFiles, prefix) => {
 };
 
 /**
- * Parses a CSV file and converts it to a JSON object for this project only.
- * Returns { projectJson, wgs84Points } where wgs84Points is [[lon,lat], ...]
- * for hull computation.
+ * Parses a CSV file and converts it to a GeoJSON FeatureCollection
+ * where each image point is a GeoJSON Point Feature.
+ *
+ * Returns { projectGeoJson, wgs84Points }
  */
-export const convertCsvToJson = (csvFile, prefix, urlMap = new Map()) => {
+export const convertCsvToGeoJson = (csvFile, prefix, urlMap = new Map()) => {
   return new Promise((resolve, reject) => {
     Papa.parse(csvFile, {
       delimiter: ';',
@@ -152,7 +146,7 @@ export const convertCsvToJson = (csvFile, prefix, urlMap = new Map()) => {
       comments: '#',
       complete: (results) => {
         try {
-          const projectJson = {};
+          const features = [];
           const wgs84Points = [];
 
           const col_names = [
@@ -178,29 +172,41 @@ export const convertCsvToJson = (csvFile, prefix, urlMap = new Map()) => {
             const x = parseFloat(row.pano_pos_x);
             const y = parseFloat(row.pano_pos_y);
 
-            // Convert to WGS84 for hull/centroid
             const { lat, lon } = spcsToLatLon(x, y);
             wgs84Points.push([lon, lat]);
 
-            projectJson[key] = {
-              id: parseInt(row.ID, 10),
-              url: publicUrl,
-              timestamp: parseFloat(row.timestamp),
-              position: {
-                x,
-                y,
-                z: parseFloat(row.pano_pos_z),
+            features.push({
+              type: 'Feature',
+              geometry: {
+                type: 'Point',
+                coordinates: [lon, lat],
               },
-              orientation: {
-                w: parseFloat(row.pano_ori_w),
-                x: parseFloat(row.pano_ori_x),
-                y: parseFloat(row.pano_ori_y),
-                z: parseFloat(row.pano_ori_z),
+              properties: {
+                id: parseInt(row.ID, 10),
+                key,
+                url: publicUrl,
+                timestamp: parseFloat(row.timestamp),
+                position: {
+                  x,
+                  y,
+                  z: parseFloat(row.pano_pos_z),
+                },
+                orientation: {
+                  w: parseFloat(row.pano_ori_w),
+                  x: parseFloat(row.pano_ori_x),
+                  y: parseFloat(row.pano_ori_y),
+                  z: parseFloat(row.pano_ori_z),
+                },
               },
-            };
+            });
           });
 
-          resolve({ projectJson, wgs84Points });
+          const projectGeoJson = {
+            type: 'FeatureCollection',
+            features,
+          };
+
+          resolve({ projectGeoJson, wgs84Points });
         } catch (error) {
           reject(error);
         }
@@ -211,28 +217,21 @@ export const convertCsvToJson = (csvFile, prefix, urlMap = new Map()) => {
 };
 
 /**
- * Merges newly converted JSON data into existing master JSON data.
- * New data takes precedence and will overwrite existing keys.
- * Kept for backward compatibility during migration.
- */
-export const mergeJsonData = (existingJson, newJson) => {
-  return { ...existingJson, ...newJson };
-};
-
-/**
- * Builds a master index entry for this project.
+ * Builds a GeoJSON Feature for the master index (pano_index.geojson).
+ * Geometry is the convex hull Polygon of all image points.
+ * Properties contain all project metadata.
+ *
  * @param {string} folder - e.g. "RIDGEVALE_20250626"
- * @param {object} projectJson - the per-project pano entries
- * @param {number[]} wgs84Points - [[lon,lat], ...] from CSV conversion
+ * @param {number} imageCount - number of images in the project
+ * @param {number[][]} wgs84Points - [[lon,lat], ...]
  * @param {object} metadata - { name, town, owner, description }
- * @param {string} publicUrl - R2 base URL
- * @returns {object} - one index entry
+ * @param {string} publicUrl - R2 base public URL
+ * @returns {object} GeoJSON Feature
  */
-export const buildIndexEntry = (folder, projectJson, wgs84Points, metadata, publicUrl) => {
+export const buildIndexFeature = (folder, imageCount, wgs84Points, metadata, publicUrl) => {
   const hullCoords = convexHull(wgs84Points);
   const center = centroid(wgs84Points);
 
-  // Parse date from folder name — expects PROJECTNAME_YYYYMMDD or PROJECTNAME_YYYY-MM-DD
   const dateMatch = folder.match(/(\d{4}-\d{2}-\d{2}|\d{8})$/);
   let date = '';
   if (dateMatch) {
@@ -243,29 +242,46 @@ export const buildIndexEntry = (folder, projectJson, wgs84Points, metadata, publ
   }
 
   return {
-    id: folder,
-    name: metadata.name || folder,
-    town: metadata.town || '',
-    description: metadata.description || '',
-    owner: metadata.owner || 'ESE LLC',
-    date,
-    image_count: Object.keys(projectJson).length,
-    json_url: `${publicUrl}/${folder}/pano_data.json`,
-    centroid: center,
-    hull: {
+    type: 'Feature',
+    geometry: {
       type: 'Polygon',
       coordinates: [hullCoords],
+    },
+    properties: {
+      id: folder,
+      name: metadata.name || folder,
+      town: metadata.town || '',
+      owner: metadata.owner || 'ESE LLC',
+      description: metadata.description || '',
+      date,
+      image_count: imageCount,
+      centroid: center,
+      data_url: `${publicUrl}/${folder}/pano_data.geojson`,
     },
   };
 };
 
 /**
- * Merges a new index entry into the existing master index array.
- * Replaces the entry with the same id if it exists.
+ * Merges a new Feature into an existing GeoJSON FeatureCollection.
+ * Replaces any existing feature with the same properties.id.
+ *
+ * @param {object} existingCollection - GeoJSON FeatureCollection (or empty array fallback)
+ * @param {object} newFeature - GeoJSON Feature to add/replace
+ * @returns {object} updated GeoJSON FeatureCollection
  */
-export const mergeIndexEntry = (existingIndex, newEntry) => {
-  const filtered = existingIndex.filter(e => e.id !== newEntry.id);
-  return [...filtered, newEntry];
+export const mergeIndexFeature = (existingCollection, newFeature) => {
+  const existing = Array.isArray(existingCollection)
+    ? { type: 'FeatureCollection', features: [] }
+    : existingCollection;
+
+  const filtered = (existing.features || []).filter(
+    f => f.properties?.id !== newFeature.properties.id
+  );
+
+  return {
+    type: 'FeatureCollection',
+    features: [...filtered, newFeature],
+  };
 };
 
 /**
