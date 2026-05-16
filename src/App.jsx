@@ -7,17 +7,14 @@ import PrefixInput from './components/PrefixInput';
 import ActionPanel from './components/ActionPanel';
 import {
   renameImageFiles,
-  convertCsvToJson,
-  mergeJsonData,
-  buildIndexEntry,
-  mergeIndexEntry,
+  convertCsvToGeoJson,
+  buildIndexFeature,
+  mergeIndexFeature,
 } from './lib/fileUtils';
 import {
   uploadFilesToR2,
-  uploadJsonToR2,
-  uploadProjectJsonToR2,
+  uploadProjectGeoJsonToR2,
   uploadIndexToR2,
-  fetchJsonFromR2,
   fetchIndexFromR2,
   getPublicUrl,
 } from './lib/r2Upload';
@@ -26,7 +23,7 @@ import {
 const STAGES = {
   EXTRACTING: 'extracting',
   UPLOADING:  'uploading',
-  JSON:       'json',
+  GEOJSON:    'geojson',
   INDEX:      'index',
   DONE:       'done',
   CANCELLED:  'cancelled',
@@ -38,51 +35,39 @@ function App() {
   const [rawFiles, setRawFiles]   = useState([]);
   const [hasZip, setHasZip]       = useState(false);
 
-  // master JSON fetched from R2 on load
-  const [masterJson, setMasterJson]       = useState(null);
-  const [jsonLoadError, setJsonLoadError] = useState(null);
-
-  // master index fetched from R2 on load
-  const [masterIndex, setMasterIndex]         = useState(null);
-  const [indexLoadError, setIndexLoadError]   = useState(null);
+  // master index (GeoJSON FeatureCollection) fetched from R2 on load
+  const [masterIndex, setMasterIndex]       = useState(null);
+  const [indexLoadError, setIndexLoadError] = useState(null);
 
   const [prefix, setPrefix] = useState('');
 
   // project metadata
-  const [projectName, setProjectName]           = useState('');
-  const [projectTown, setProjectTown]           = useState('');
-  const [projectOwner, setProjectOwner]         = useState('ESE LLC');
+  const [projectName, setProjectName]               = useState('');
+  const [projectTown, setProjectTown]               = useState('');
+  const [projectOwner, setProjectOwner]             = useState('ESE LLC');
   const [projectDescription, setProjectDescription] = useState('');
 
   // progress modal state
-  const [modalOpen, setModalOpen]   = useState(false);
-  const [stage, setStage]           = useState(null);
+  const [modalOpen, setModalOpen]             = useState(false);
+  const [stage, setStage]                     = useState(null);
   const [extractProgress, setExtractProgress] = useState({ done: 0, total: 0 });
   const [uploadProgress, setUploadProgress]   = useState({ done: 0, total: 0 });
-  const [jsonPublicUrl, setJsonPublicUrl]     = useState(null);
+  const [resultUrl, setResultUrl]             = useState(null);
   const [errorMessage, setErrorMessage]       = useState(null);
 
   // cancel signal
   const cancelledRef = useRef(false);
 
-  // fetch master JSON and index from R2 on load
+  // fetch master index from R2 on load
   useEffect(() => {
-    fetchJsonFromR2()
-      .then(data => setMasterJson(data))
-      .catch(err => {
-        console.error('Could not load pano_data.json from R2:', err);
-        setJsonLoadError(err.message);
-      });
-
     fetchIndexFromR2()
       .then(data => setMasterIndex(data))
       .catch(err => {
-        console.error('Could not load pano_index.json from R2:', err);
+        console.error('Could not load pano_index.geojson from R2:', err);
         setIndexLoadError(err.message);
       });
   }, []);
 
-  // when files are dropped/selected, just store them
   const handleFileSelection = (selectedFiles) => {
     setRawFiles(selectedFiles);
     setHasZip(selectedFiles.some(f => f.name.toLowerCase().endsWith('.zip')));
@@ -103,7 +88,7 @@ function App() {
     setStage(null);
     setExtractProgress({ done: 0, total: 0 });
     setUploadProgress({ done: 0, total: 0 });
-    setJsonPublicUrl(null);
+    setResultUrl(null);
     setErrorMessage(null);
     cancelledRef.current = false;
   };
@@ -114,10 +99,6 @@ function App() {
       alert('Please upload files and provide a prefix.');
       return;
     }
-    if (masterJson === null) {
-      alert('Still loading master JSON from R2 — please wait a moment and try again.');
-      return;
-    }
     if (masterIndex === null) {
       alert('Still loading project index from R2 — please wait a moment and try again.');
       return;
@@ -126,7 +107,7 @@ function App() {
     cancelledRef.current = false;
     setExtractProgress({ done: 0, total: 0 });
     setUploadProgress({ done: 0, total: 0 });
-    setJsonPublicUrl(null);
+    setResultUrl(null);
     setErrorMessage(null);
     setModalOpen(true);
 
@@ -202,17 +183,12 @@ function App() {
 
       if (cancelledRef.current) return;
 
-      // ── Step 4: convert CSV → project JSON ────────────────────────────
-      setStage(STAGES.JSON);
+      // ── Step 4: convert CSV → per-project GeoJSON ─────────────────────
+      setStage(STAGES.GEOJSON);
 
-      const { projectJson, wgs84Points } = await convertCsvToJson(csvFile, processingPrefix, urlMap);
+      const { projectGeoJson, wgs84Points } = await convertCsvToGeoJson(csvFile, processingPrefix, urlMap);
 
-      // Upload per-project JSON to FOLDER/pano_data.json
-      await uploadProjectJsonToR2(folder, projectJson);
-
-      // Also merge into legacy root pano_data.json during migration period
-      const finalMasterJson = mergeJsonData(masterJson, projectJson);
-      const legacyUrl = await uploadJsonToR2(finalMasterJson);
+      await uploadProjectGeoJsonToR2(folder, projectGeoJson);
 
       if (cancelledRef.current) return;
 
@@ -226,15 +202,14 @@ function App() {
         description: projectDescription,
       };
 
-      const newEntry   = buildIndexEntry(folder, projectJson, wgs84Points, metadata, getPublicUrl());
-      const finalIndex = mergeIndexEntry(masterIndex, newEntry);
-      const indexUrl   = await uploadIndexToR2(finalIndex);
+      const newFeature   = buildIndexFeature(folder, projectGeoJson.features.length, wgs84Points, metadata, getPublicUrl());
+      const finalIndex   = mergeIndexFeature(masterIndex, newFeature);
+      const indexUrl     = await uploadIndexToR2(finalIndex);
 
       if (cancelledRef.current) return;
 
-      setMasterJson(finalMasterJson);
       setMasterIndex(finalIndex);
-      setJsonPublicUrl(indexUrl);
+      setResultUrl(indexUrl);
       setStage(STAGES.DONE);
 
     } catch (err) {
@@ -266,12 +241,12 @@ function App() {
         <ProgressRow
           label="Uploading images to R2"
           active={stage === STAGES.UPLOADING}
-          done={[STAGES.JSON, STAGES.INDEX, STAGES.DONE].includes(stage)}
+          done={[STAGES.GEOJSON, STAGES.INDEX, STAGES.DONE].includes(stage)}
           progress={uploadProgress}
         />
         <ProgressRow
-          label="Writing project JSON"
-          active={stage === STAGES.JSON}
+          label="Writing project GeoJSON"
+          active={stage === STAGES.GEOJSON}
           done={[STAGES.INDEX, STAGES.DONE].includes(stage)}
         />
         <ProgressRow
@@ -284,12 +259,12 @@ function App() {
           <div className="rounded-md bg-green-50 border border-green-200 p-3">
             <p className="text-sm font-semibold text-green-700 mb-1">✓ All done!</p>
             <a
-              href={jsonPublicUrl}
+              href={resultUrl}
               target="_blank"
               rel="noreferrer"
               className="text-xs text-blue-600 underline break-all"
             >
-              {jsonPublicUrl}
+              {resultUrl}
             </a>
           </div>
         )}
@@ -328,6 +303,9 @@ function App() {
     );
   };
 
+  // ── Index status indicator ───────────────────────────────────────────────
+  const projectCount = masterIndex?.features?.length ?? 0;
+
   return (
     <>
       {/* Progress modal */}
@@ -343,21 +321,7 @@ function App() {
       <main className="flex flex-col items-center p-5 space-y-4 max-w-2xl mx-auto">
         <h1 className="text-3xl font-bold">Pano Sync Processor</h1>
 
-        {/* R2 status indicators */}
-        <div className={`w-full px-4 py-2 rounded-md border text-sm ${
-          jsonLoadError
-            ? 'bg-red-50 border-red-200 text-red-600'
-            : masterJson === null
-            ? 'bg-yellow-50 border-yellow-200 text-yellow-600'
-            : 'bg-green-50 border-green-200 text-green-700'
-        }`}>
-          {jsonLoadError
-            ? `⚠ Could not load master JSON from R2: ${jsonLoadError}`
-            : masterJson === null
-            ? '⏳ Loading master JSON from R2...'
-            : `✓ Master JSON loaded — ${Object.keys(masterJson).length.toLocaleString()} entries`}
-        </div>
-
+        {/* R2 index status */}
         <div className={`w-full px-4 py-2 rounded-md border text-sm ${
           indexLoadError
             ? 'bg-red-50 border-red-200 text-red-600'
@@ -369,7 +333,7 @@ function App() {
             ? `⚠ Could not load project index from R2: ${indexLoadError}`
             : masterIndex === null
             ? '⏳ Loading project index from R2...'
-            : `✓ Project index loaded — ${masterIndex.length} project${masterIndex.length !== 1 ? 's' : ''}`}
+            : `✓ Project index loaded — ${projectCount} project${projectCount !== 1 ? 's' : ''}`}
         </div>
 
         {/* Step 1: Files */}
@@ -378,7 +342,7 @@ function App() {
           <FileUploader
             title="JPG Images & CSV File (or ZIP folder)"
             onFilesSelected={handleFileSelection}
-            accept=".jpg,.jpeg,.csv"
+            accept=".jpg,.jpeg,.csv,.zip"
             multiple
           />
           <div className="mt-2 space-y-1">
@@ -418,9 +382,7 @@ function App() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Town
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Town</label>
               <input
                 type="text"
                 value={projectTown}
@@ -431,9 +393,7 @@ function App() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Owner
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Owner</label>
               <input
                 type="text"
                 value={projectOwner}
