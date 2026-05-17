@@ -5,6 +5,8 @@ import JSZip from 'jszip';
 import FileUploader from './components/FileUploader';
 import PrefixInput from './components/PrefixInput';
 import ActionPanel from './components/ActionPanel';
+import Auth from './components/Auth';
+import { supabase } from './lib/supabaseClient';
 import {
   renameImageFiles,
   parseCsvRaw,
@@ -41,6 +43,8 @@ const STAGES = {
 };
 
 function App() {
+  const [session, setSession] = useState(null);
+
   const [rawFiles, setRawFiles] = useState([]);
   const [hasZip, setHasZip]     = useState(false);
 
@@ -62,20 +66,37 @@ function App() {
   const [resultUrl, setResultUrl]             = useState(null);
   const [errorMessage, setErrorMessage]       = useState(null);
 
-  // coordCheck shape: { sampleX, sampleY, projCode, swapXY, valid, wgsPreview, message }
   const [coordCheck, setCoordCheck] = useState(null);
 
   const pendingPipelineRef = useRef(null);
   const cancelledRef       = useRef(false);
 
+  // ── Auth ─────────────────────────────────────────────────────────────────
   useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  // ── Load index from R2 ───────────────────────────────────────────────────
+  useEffect(() => {
+    if (!session) return;
     fetchIndexFromR2()
       .then(data => setMasterIndex(data))
       .catch(err => {
         console.error('Could not load pano_index.geojson from R2:', err);
         setIndexLoadError(err.message);
       });
-  }, []);
+  }, [session]);
+
+  // ── Gate: show login if no session ───────────────────────────────────────
+  if (!session) return <Auth />;
 
   const handleFileSelection = (selectedFiles) => {
     setRawFiles(selectedFiles);
@@ -103,6 +124,10 @@ function App() {
     cancelledRef.current = false;
   };
 
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+  };
+
   // ── Build coord check ────────────────────────────────────────────────────
   const buildCheck = (sampleX, sampleY, code, swapXY) => {
     const easting  = swapXY ? sampleY : sampleX;
@@ -113,21 +138,18 @@ function App() {
     return { sampleX, sampleY, projCode: code, swapXY, valid: validation.ok, message: validation.message, wgsPreview };
   };
 
-  // ── Toggle switch flipped ────────────────────────────────────────────────
   const handleSwapToggle = (swapXY) => {
     if (!coordCheck) return;
     const updated = buildCheck(coordCheck.sampleX, coordCheck.sampleY, coordCheck.projCode, swapXY);
     setCoordCheck(updated);
   };
 
-  // ── Projection changed in modal ──────────────────────────────────────────
   const handleModalProjectionChange = (newCode) => {
     if (!coordCheck) return;
     const updated = buildCheck(coordCheck.sampleX, coordCheck.sampleY, newCode, coordCheck.swapXY);
     setCoordCheck(updated);
   };
 
-  // ── Proceed (only callable when green) ───────────────────────────────────
   const handleProceed = () => {
     if (!coordCheck?.valid || !pendingPipelineRef.current) return;
     const { rows, folder, processingPrefix, imageFiles } = pendingPipelineRef.current;
@@ -160,7 +182,6 @@ function App() {
     setModalOpen(true);
 
     try {
-      // Step 1: extract
       let imageFiles = [];
       let csvFile    = null;
       const zipFile  = rawFiles.find(f => f.name.toLowerCase().endsWith('.zip'));
@@ -195,7 +216,6 @@ function App() {
         throw new Error('Could not find both JPG images and a CSV file.');
       }
 
-      // Step 2: parse CSV + validate
       setStage(STAGES.VALIDATING);
       const { rows, sampleX, sampleY } = await parseCsvRaw(csvFile);
 
@@ -293,7 +313,6 @@ function App() {
           <p className="font-semibold mb-1">
             {valid ? '✓ Coordinates verified' : '⚠ Coordinate mismatch'}
           </p>
-
           <p className="text-xs mb-0.5">
             Raw CSV: X={sampleX.toFixed(2)}, Y={sampleY.toFixed(2)}
           </p>
@@ -304,7 +323,6 @@ function App() {
           )}
           <p className="text-xs mb-3">{message}</p>
 
-          {/* XY / YX toggle switch */}
           {isPaused && (
             <div className="flex flex-col gap-3">
               <div className="flex items-center gap-3">
@@ -324,7 +342,6 @@ function App() {
                 <span className={`text-xs font-medium ${swapXY ? 'text-gray-900' : 'text-gray-400'}`}>Y,X</span>
               </div>
 
-              {/* Projection dropdown */}
               <div>
                 <label className="block text-xs font-medium mb-1">Projection:</label>
                 <select
@@ -340,7 +357,6 @@ function App() {
                 </select>
               </div>
 
-              {/* Proceed / Cancel */}
               <div className="flex gap-2">
                 <button
                   onClick={handleProceed}
@@ -367,7 +383,6 @@ function App() {
 
     return (
       <div className="flex flex-col gap-4 min-w-[340px]">
-
         <ProgressRow
           label="Extracting ZIP"
           active={stage === STAGES.EXTRACTING}
@@ -452,7 +467,16 @@ function App() {
       )}
 
       <main className="flex flex-col items-center p-5 space-y-4 max-w-2xl mx-auto">
-        <h1 className="text-3xl font-bold">Pano Sync Processor</h1>
+        <div className="w-full flex items-center justify-between">
+          <h1 className="text-3xl font-bold">Pano Sync Processor</h1>
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-gray-500">{session.user.email}</span>
+            <button onClick={handleSignOut}
+              className="text-xs px-3 py-1 rounded-md border border-gray-300 text-gray-600 hover:bg-gray-100 transition-colors">
+              Sign out
+            </button>
+          </div>
+        </div>
 
         <div className={`w-full px-4 py-2 rounded-md border text-sm ${
           indexLoadError ? 'bg-red-50 border-red-200 text-red-600'
