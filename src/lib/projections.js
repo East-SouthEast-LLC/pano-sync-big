@@ -4,7 +4,7 @@ export const PROJECTIONS = [
   {
     code: 'EPSG:6491',
     label: 'EPSG:6491 — MA State Plane (meters)',
-    proj4def: '+proj=lcc +lat_0=41 +lon_0=-71.5 +k=0.9999666667 +x_0=200000.0001016002 +y_0=750000.0001016002 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs',
+    proj4def: '+proj=lcc +lat_1=42.68333333333333 +lat_2=41.71666666666667 +lat_0=41 +lon_0=-71.5 +x_0=200000 +y_0=750000 +ellps=GRS80 +datum=NAD83 +units=m +no_defs',
     xRange: [180000, 320000],   // easting in meters
     yRange: [730000, 920000],   // northing in meters
     hint: 'MA State Plane (meters): easting ~180k–320k m, northing ~730k–920k m',
