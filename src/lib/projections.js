@@ -12,7 +12,7 @@ export const PROJECTIONS = [
   {
     code: 'EPSG:2249',
     label: 'EPSG:2249 — MA State Plane (US survey ft)',
-    proj4def: '+proj=tmerc +lat_0=41 +lon_0=-71.5 +k=0.9999666667 +x_0=200000.0001016002 +y_0=750000.0001016002 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=us-ft +no_defs',
+    proj4def: '+proj=lcc +lat_0=41 +lon_0=-71.5 +k=0.9999666667 +x_0=200000.0001016002 +y_0=750000.0001016002 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=us-ft +no_defs',
     xRange: [600000, 1000000],  // easting in US survey feet
     yRange: [2400000, 3000000], // northing in US survey feet
     hint: 'MA State Plane (US ft): easting ~600k–1000k ft, northing ~2.4M–3.0M ft',
