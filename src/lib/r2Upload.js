@@ -7,7 +7,7 @@ const ACCESS_KEY_ID = import.meta.env.VITE_R2_ACCESS_KEY_ID;
 const SECRET_ACCESS_KEY = import.meta.env.VITE_R2_SECRET_ACCESS_KEY;
 const PUBLIC_URL = import.meta.env.VITE_R2_PUBLIC_URL;
 
-const S3_ENDPOINT = `https://${ACCOUNT_ID}.r2.cloudflarestorage.com`;
+const WORKER_ENDPOINT = 'https://pano-upload-worker.ese-llc.workers.dev';
 const REGION = 'auto';
 
 // --- AWS Signature V4 helpers ---
@@ -82,15 +82,12 @@ const uploadToR2 = async (objectKey, body, contentType) => {
   const bodyHash = await sha256(bodyArray);
   const authHeader = await buildAuthHeader('PUT', objectKey, contentType, bodyHash, amzDate, dateStamp);
 
-  const url = `${S3_ENDPOINT}/${BUCKET_NAME}/${objectKey}`;
+  const url = `${WORKER_ENDPOINT}/${objectKey}`;
 
   const response = await fetch(url, {
     method: 'PUT',
     headers: {
       'Content-Type': contentType,
-      'x-amz-date': amzDate,
-      'x-amz-content-sha256': bodyHash,
-      'Authorization': authHeader,
     },
     body: bodyArray,
   });
