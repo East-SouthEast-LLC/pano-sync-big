@@ -219,8 +219,9 @@ function App() {
       setStage(STAGES.VALIDATING);
       const { rows, sampleX, sampleY } = await parseCsvRaw(csvFile);
 
-      const processingPrefix = prefix.endsWith('_') ? prefix : `${prefix}_`;
-      const folder           = processingPrefix.replace(/_$/, '');
+		const sanitized        = prefix.trim().replace(/\s+/g, '_');
+		const processingPrefix = sanitized.endsWith('_') ? sanitized : `${sanitized}_`;
+		const folder           = processingPrefix.replace(/_$/, '');
 
       let resolvedCode = projCode;
       if (projCode === AUTO_DETECT_CODE) {
