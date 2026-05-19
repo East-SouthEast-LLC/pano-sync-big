@@ -1,5 +1,5 @@
 // src/lib/r2Upload.js
-// Uses the S3-compatible API with AWS Signature V4 for authentication.
+// Images upload directly to S3 endpoint (signed). GeoJSON goes through Worker.
 
 const ACCOUNT_ID = import.meta.env.VITE_R2_ACCOUNT_ID;
 const BUCKET_NAME = import.meta.env.VITE_R2_BUCKET_NAME;
@@ -7,6 +7,7 @@ const ACCESS_KEY_ID = import.meta.env.VITE_R2_ACCESS_KEY_ID;
 const SECRET_ACCESS_KEY = import.meta.env.VITE_R2_SECRET_ACCESS_KEY;
 const PUBLIC_URL = import.meta.env.VITE_R2_PUBLIC_URL;
 
+const S3_ENDPOINT = `https://${ACCOUNT_ID}.r2.cloudflarestorage.com`;
 const WORKER_ENDPOINT = 'https://pano-upload-worker.ese-llc.workers.dev';
 const REGION = 'auto';
 
@@ -42,7 +43,6 @@ const getSigningKey = async (dateStamp) => {
 const buildAuthHeader = async (method, objectKey, contentType, bodyHash, amzDate, dateStamp) => {
   const host = `${ACCOUNT_ID}.r2.cloudflarestorage.com`;
   const canonicalUri = `/${BUCKET_NAME}/${objectKey}`;
-  const canonicalQueryString = '';
   const canonicalHeaders =
     `content-type:${contentType}\n` +
     `host:${host}\n` +
@@ -51,7 +51,7 @@ const buildAuthHeader = async (method, objectKey, contentType, bodyHash, amzDate
   const signedHeaders = 'content-type;host;x-amz-content-sha256;x-amz-date';
 
   const canonicalRequest = [
-    method, canonicalUri, canonicalQueryString,
+    method, canonicalUri, '',
     canonicalHeaders, signedHeaders, bodyHash,
   ].join('\n');
 
@@ -68,33 +68,52 @@ const buildAuthHeader = async (method, objectKey, contentType, bodyHash, amzDate
 };
 
 /**
- * Core upload function — uploads any file/blob to R2 at the given object key.
+ * Upload images directly to S3 endpoint with AWS Signature V4.
  */
-const uploadToR2 = async (objectKey, body, contentType) => {
+const uploadImageToS3 = async (objectKey, body, contentType) => {
   const now = new Date();
   const amzDate = now.toISOString().replace(/[:\-]|\.\d{3}/g, '').slice(0, 15) + 'Z';
   const dateStamp = amzDate.slice(0, 8);
 
-  const bodyArray = body instanceof Blob
-    ? await body.arrayBuffer()
-    : encoder.encode(body);
-
+  const bodyArray = body instanceof Blob ? await body.arrayBuffer() : encoder.encode(body);
   const bodyHash = await sha256(bodyArray);
   const authHeader = await buildAuthHeader('PUT', objectKey, contentType, bodyHash, amzDate, dateStamp);
 
-  const url = `${WORKER_ENDPOINT}/${objectKey}`;
+  const url = `${S3_ENDPOINT}/${BUCKET_NAME}/${objectKey}`;
 
   const response = await fetch(url, {
     method: 'PUT',
     headers: {
       'Content-Type': contentType,
+      'x-amz-date': amzDate,
+      'x-amz-content-sha256': bodyHash,
+      'Authorization': authHeader,
     },
     body: bodyArray,
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`Upload failed for ${objectKey}: ${response.status} ${errorText}`);
+    throw new Error(`S3 upload failed for ${objectKey}: ${response.status} ${errorText}`);
+  }
+};
+
+/**
+ * Upload small files (GeoJSON) through the Worker.
+ */
+const uploadViaWorker = async (objectKey, body, contentType) => {
+  const bodyArray = body instanceof Blob ? await body.arrayBuffer() : encoder.encode(body);
+  const url = `${WORKER_ENDPOINT}/${objectKey}`;
+
+  const response = await fetch(url, {
+    method: 'PUT',
+    headers: { 'Content-Type': contentType },
+    body: bodyArray,
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Worker upload failed for ${objectKey}: ${response.status} ${errorText}`);
   }
 };
 
@@ -103,10 +122,6 @@ export const getPublicUrl = () => PUBLIC_URL;
 
 // ── Fetch functions ───────────────────────────────────────────────────────────
 
-/**
- * Fetches the master project index (pano_index.geojson) from R2.
- * Returns an empty FeatureCollection if the file doesn't exist yet.
- */
 export const fetchIndexFromR2 = async () => {
   const url = `${PUBLIC_URL}/pano_index.geojson?nocache=${Date.now()}`;
   const response = await fetch(url);
@@ -123,18 +138,18 @@ export const fetchIndexFromR2 = async () => {
 // ── Upload functions ──────────────────────────────────────────────────────────
 
 /**
- * Uploads a single image file to R2 inside a folder named after the prefix.
+ * Uploads a single image file directly to S3.
  */
 export const uploadFileToR2 = async (file, folder, onProgress) => {
   const objectKey = `${folder}/${file.name}`;
   if (onProgress) onProgress(file.name, 'uploading');
-  await uploadToR2(objectKey, file, file.type || 'image/jpeg');
+  await uploadImageToS3(objectKey, file, file.type || 'image/jpeg');
   if (onProgress) onProgress(file.name, 'done');
   return `${PUBLIC_URL}/${objectKey}`;
 };
 
 /**
- * Uploads an array of image files to R2 in parallel.
+ * Uploads an array of image files in parallel directly to S3.
  */
 export const uploadFilesToR2 = async (files, folder, onProgress) => {
   const urlMap = new Map();
@@ -148,28 +163,21 @@ export const uploadFilesToR2 = async (files, folder, onProgress) => {
 };
 
 /**
- * Uploads a per-project pano_data.geojson to FOLDER/pano_data.geojson in R2.
- *
- * @param {string} folder - e.g. "RIDGEVALE_20250626"
- * @param {object} projectGeoJson - GeoJSON FeatureCollection of image points
- * @returns {Promise<string>} - public URL of the uploaded file
+ * Uploads per-project pano_data.geojson via Worker.
  */
 export const uploadProjectGeoJsonToR2 = async (folder, projectGeoJson) => {
   const objectKey = `${folder}/pano_data.geojson`;
   const body = JSON.stringify(projectGeoJson, null, 2);
-  await uploadToR2(objectKey, body, 'application/geo+json');
+  await uploadViaWorker(objectKey, body, 'application/geo+json');
   return `${PUBLIC_URL}/${objectKey}`;
 };
 
 /**
- * Uploads the master project index to pano_index.geojson at bucket root.
- *
- * @param {object} featureCollection - GeoJSON FeatureCollection of project hulls
- * @returns {Promise<string>} - public URL of the uploaded file
+ * Uploads master pano_index.geojson via Worker.
  */
 export const uploadIndexToR2 = async (featureCollection) => {
   const objectKey = 'pano_index.geojson';
   const body = JSON.stringify(featureCollection, null, 2);
-  await uploadToR2(objectKey, body, 'application/geo+json');
+  await uploadViaWorker(objectKey, body, 'application/geo+json');
   return `${PUBLIC_URL}/${objectKey}`;
 };
