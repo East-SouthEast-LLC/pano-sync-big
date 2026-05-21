@@ -208,6 +208,7 @@ export const buildIndexFeature = (folder, imageCount, wgs84Points, metadata, pub
       image_count: imageCount,
       centroid:    center,
       data_url:    `${publicUrl}/${folder}/pano_data.geojson`,
+      private:     false,
     },
   };
 };
