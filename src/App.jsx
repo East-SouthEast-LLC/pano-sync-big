@@ -268,7 +268,7 @@ function App() {
 
       setStage(STAGES.GEOJSON);
       const { projectGeoJson, wgs84Points } = buildProjectGeoJson(rows, processingPrefix, resolvedCode, swapXY, urlMap);
-      await uploadProjectGeoJsonToR2(folder, projectGeoJson);
+      await uploadProjectGeoJsonToR2(folder, projectGeoJson, session.access_token);
       if (cancelledRef.current) return;
 
       setStage(STAGES.INDEX);
@@ -278,7 +278,7 @@ function App() {
       };
       const newFeature = buildIndexFeature(folder, projectGeoJson.features.length, wgs84Points, metadata, getPublicUrl());
       const finalIndex = mergeIndexFeature(masterIndex, newFeature);
-      const indexUrl   = await uploadIndexToR2(finalIndex);
+      const indexUrl   = await uploadIndexToR2(finalIndex, session.access_token);
       if (cancelledRef.current) return;
 
       setMasterIndex(finalIndex);
