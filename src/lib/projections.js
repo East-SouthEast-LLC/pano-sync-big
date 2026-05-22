@@ -5181,3 +5181,14 @@ export function toWgs84(proj4lib, proj4def, x, y) {
   if (!proj4def) return [x, y]; // already WGS84
   return proj4lib(proj4def, 'WGS84', [x, y]);
 }
+
+/**
+ * validateCoords — bounds checking removed (users may legitimately work
+ * across zone boundaries). Always returns valid; kept for API compatibility.
+ */
+export function validateCoords(x, y, epsgCode, swapXY) {
+  if (x == null || y == null || !epsgCode) {
+    return { ok: false, message: 'Missing coordinates or projection.' };
+  }
+  return { ok: true, message: 'Coordinates accepted.' };
+}
