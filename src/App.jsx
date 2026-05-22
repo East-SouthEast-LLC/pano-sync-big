@@ -559,7 +559,7 @@ function App() {
                 <option value={AUTO_DETECT_CODE}>AUTO — Auto-detect from coordinates</option>
                 {PROJECTIONS.map(p => (
                   <option key={p.code} value={p.code}>
-                    {p.code} — {p.label.split('—')[1]?.trim() ?? p.label}
+                    {p.label}
                   </option>
                 ))}
               </select>
