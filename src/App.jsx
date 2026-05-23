@@ -76,13 +76,16 @@ function App() {
 
   // ── Auth ─────────────────────────────────────────────────────────────────
   useEffect(() => {
-    // Check for Stripe checkout redirect params
+    // Check for Stripe checkout redirect params or direct billing link
     const params = new URLSearchParams(window.location.search);
     const checkout = params.get('checkout');
+    const billing  = params.get('billing');
     if (checkout === 'success' || checkout === 'cancel') {
       setCheckoutStatus(checkout);
       setPage('billing');
-      // Clean URL
+      window.history.replaceState({}, '', window.location.pathname);
+    } else if (billing === 'true') {
+      setPage('billing');
       window.history.replaceState({}, '', window.location.pathname);
     }
 
@@ -292,7 +295,7 @@ function App() {
 
       setStage(STAGES.GEOJSON);
       const { projectGeoJson, wgs84Points } = buildProjectGeoJson(rows, processingPrefix, resolvedCode, swapXY, urlMap);
-      await uploadProjectGeoJsonToR2(folder, projectGeoJson, session.access_token);
+      await uploadProjectGeoJsonToR2(folder, projectGeoJson);
       if (cancelledRef.current) return;
 
       setStage(STAGES.INDEX);
@@ -302,7 +305,7 @@ function App() {
       };
       const newFeature = buildIndexFeature(folder, projectGeoJson.features.length, wgs84Points, metadata, getPublicUrl());
       const finalIndex = mergeIndexFeature(masterIndex, newFeature);
-      const indexUrl   = await uploadIndexToR2(finalIndex, session.access_token);
+      const indexUrl   = await uploadIndexToR2(finalIndex);
       if (cancelledRef.current) return;
 
       setMasterIndex(finalIndex);
@@ -496,7 +499,7 @@ function App() {
           <h1 className="text-3xl font-bold">Pano Sync Processor</h1>
           <div className="flex items-center gap-3">
             <span className="text-xs text-gray-500">{session.user.email}</span>
-            <button onClick={() => setPage('billing')}
+            <button onClick={() => window.open('https://east-southeast-llc.github.io/pano-sync-big/?billing=true', '_blank')}
               className="text-xs px-3 py-1 rounded-md border border-gray-300 text-gray-600 hover:bg-gray-100 transition-colors">
               Billing
             </button>
@@ -587,7 +590,7 @@ function App() {
                 <option value={AUTO_DETECT_CODE}>AUTO — Auto-detect from coordinates</option>
                 {PROJECTIONS.map(p => (
                   <option key={p.code} value={p.code}>
-                    {p.label}
+                    {p.code} — {p.label.split('—')[1]?.trim() ?? p.label}
                   </option>
                 ))}
               </select>
