@@ -6,6 +6,7 @@ import FileUploader from './components/FileUploader';
 import PrefixInput from './components/PrefixInput';
 import ActionPanel from './components/ActionPanel';
 import Auth from './components/Auth';
+import BillingPage from './components/BillingPage';
 import { supabase } from './lib/supabaseClient';
 import {
   renameImageFiles,
@@ -44,6 +45,8 @@ const STAGES = {
 
 function App() {
   const [session, setSession] = useState(null);
+  const [page, setPage] = useState('upload'); // 'upload' | 'billing'
+  const [checkoutStatus, setCheckoutStatus] = useState(null); // 'success' | 'cancel' | null
 
   const [rawFiles, setRawFiles] = useState([]);
   const [hasZip, setHasZip]     = useState(false);
@@ -73,6 +76,16 @@ function App() {
 
   // ── Auth ─────────────────────────────────────────────────────────────────
   useEffect(() => {
+    // Check for Stripe checkout redirect params
+    const params = new URLSearchParams(window.location.search);
+    const checkout = params.get('checkout');
+    if (checkout === 'success' || checkout === 'cancel') {
+      setCheckoutStatus(checkout);
+      setPage('billing');
+      // Clean URL
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
     });
@@ -97,6 +110,17 @@ function App() {
 
   // ── Gate: show login if no session ───────────────────────────────────────
   if (!session) return <Auth />;
+
+  // ── Billing page ──────────────────────────────────────────────────────────
+  if (page === 'billing') {
+    return (
+      <BillingPage
+        session={session}
+        onBack={() => { setPage('upload'); setCheckoutStatus(null); }}
+        checkoutStatus={checkoutStatus}
+      />
+    );
+  }
 
   const handleFileSelection = (selectedFiles) => {
     setRawFiles(selectedFiles);
@@ -472,6 +496,10 @@ function App() {
           <h1 className="text-3xl font-bold">Pano Sync Processor</h1>
           <div className="flex items-center gap-3">
             <span className="text-xs text-gray-500">{session.user.email}</span>
+            <button onClick={() => setPage('billing')}
+              className="text-xs px-3 py-1 rounded-md border border-gray-300 text-gray-600 hover:bg-gray-100 transition-colors">
+              Billing
+            </button>
             <button onClick={handleSignOut}
               className="text-xs px-3 py-1 rounded-md border border-gray-300 text-gray-600 hover:bg-gray-100 transition-colors">
               Sign out
