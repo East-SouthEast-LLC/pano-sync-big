@@ -292,7 +292,7 @@ function App() {
 
       setStage(STAGES.GEOJSON);
       const { projectGeoJson, wgs84Points } = buildProjectGeoJson(rows, processingPrefix, resolvedCode, swapXY, urlMap);
-      await uploadProjectGeoJsonToR2(folder, projectGeoJson);
+      await uploadProjectGeoJsonToR2(folder, projectGeoJson, session.access_token);
       if (cancelledRef.current) return;
 
       setStage(STAGES.INDEX);
@@ -302,7 +302,7 @@ function App() {
       };
       const newFeature = buildIndexFeature(folder, projectGeoJson.features.length, wgs84Points, metadata, getPublicUrl());
       const finalIndex = mergeIndexFeature(masterIndex, newFeature);
-      const indexUrl   = await uploadIndexToR2(finalIndex);
+      const indexUrl   = await uploadIndexToR2(finalIndex, session.access_token);
       if (cancelledRef.current) return;
 
       setMasterIndex(finalIndex);
@@ -587,7 +587,7 @@ function App() {
                 <option value={AUTO_DETECT_CODE}>AUTO — Auto-detect from coordinates</option>
                 {PROJECTIONS.map(p => (
                   <option key={p.code} value={p.code}>
-                    {p.code} — {p.label.split('—')[1]?.trim() ?? p.label}
+                    {p.label}
                   </option>
                 ))}
               </select>
