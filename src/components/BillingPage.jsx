@@ -6,12 +6,26 @@ const WORKER_URL = 'https://pano-upload-worker.ese-llc.workers.dev';
 
 const TIERS = [
   {
+    name: 'Free',
+    price: 0,
+    storage: '500 MB',
+    overage: null,
+    price_id: null,
+    features: ['500 MB storage', 'Map viewer access', 'Share links', 'Access codes'],
+    badge: 'No credit card required',
+    badgeStyle: 'text-gray-500',
+    tagline: null,
+  },
+  {
     name: 'Starter',
     price: 10,
     storage: '10 GB',
     overage: '$1.00 / GB',
     price_id: 'price_1Ta5KwLw1WmTSYrolucc9mho',
     features: ['10 GB storage', 'Map viewer access', 'Share links', 'Access codes'],
+    badge: 'Start Here',
+    badgeStyle: 'text-green-600',
+    tagline: 'Your plan grows automatically as you add data.',
   },
   {
     name: 'Professional',
@@ -21,6 +35,8 @@ const TIERS = [
     price_id: 'price_1Ta5LyLw1WmTSYroTldqSRuQ',
     features: ['40 GB storage', 'Map viewer access', 'Share links', 'Access codes'],
     highlight: true,
+    badge: null,
+    tagline: null,
   },
   {
     name: 'Business',
@@ -29,6 +45,8 @@ const TIERS = [
     overage: '$0.50 / GB',
     price_id: 'price_1Ta5MgLw1WmTSYroH2g20zui',
     features: ['100 GB storage', 'Map viewer access', 'Share links', 'Access codes'],
+    badge: null,
+    tagline: null,
   },
   {
     name: 'Enterprise',
@@ -37,6 +55,8 @@ const TIERS = [
     overage: 'Custom',
     price_id: 'price_1Ta5RnLw1WmTSYrousgfDOYu',
     features: ['500 GB+ storage', 'Custom pricing', 'Priority support', 'Custom onboarding'],
+    badge: null,
+    tagline: null,
   },
 ];
 
@@ -65,6 +85,8 @@ export default function BillingPage({ session, onBack, checkoutStatus }) {
       window.location.href = 'mailto:info@ese-llc.com?subject=Enterprise Subscription Inquiry';
       return;
     }
+
+    if (!price_id) return; // Free tier — no action needed
 
     setCheckingOut(price_id);
     try {
@@ -97,10 +119,10 @@ export default function BillingPage({ session, onBack, checkoutStatus }) {
 
   const currentTierName = subscription?.tier
     ? subscription.tier.charAt(0).toUpperCase() + subscription.tier.slice(1)
-    : null;
+    : 'Free';
 
   return (
-    <main className="flex flex-col items-center p-5 space-y-6 max-w-4xl mx-auto">
+    <main className="flex flex-col items-center p-5 space-y-6 max-w-5xl mx-auto">
 
       {/* Header */}
       <div className="w-full flex items-center justify-between">
@@ -142,10 +164,10 @@ export default function BillingPage({ session, onBack, checkoutStatus }) {
       )}
 
       {/* Pricing cards */}
-      <div className="w-full grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="w-full grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         {TIERS.map(tier => {
-          const isCurrent   = currentTierName?.toLowerCase() === tier.name.toLowerCase();
-          const isLoading   = checkingOut === tier.price_id;
+          const isCurrent = currentTierName?.toLowerCase() === tier.name.toLowerCase();
+          const isLoading = checkingOut === tier.price_id;
 
           return (
             <div key={tier.name}
@@ -155,16 +177,24 @@ export default function BillingPage({ session, onBack, checkoutStatus }) {
                   : 'border-gray-200 bg-gray-50'
               }`}>
 
-              {tier.highlight && (
-                <div className="text-xs font-semibold text-[#FD366E] uppercase tracking-wide">
-                  Most Popular
+              {/* Badge */}
+              {tier.badge && (
+                <div className={`text-xs font-semibold uppercase tracking-wide ${tier.badgeStyle}`}>
+                  {tier.badge}
                 </div>
+              )}
+              {tier.highlight && !tier.badge && (
+                <div className="h-4" /> {/* spacer to keep card heights aligned */}
               )}
 
               <div>
                 <h2 className="text-lg font-bold text-[#2D2D31]">{tier.name}</h2>
                 <div className="mt-1">
-                  {tier.price !== null ? (
+                  {tier.price === 0 ? (
+                    <span className="text-2xl font-bold text-[#2D2D31]">
+                      Free
+                    </span>
+                  ) : tier.price !== null ? (
                     <span className="text-2xl font-bold text-[#2D2D31]">
                       ${tier.price}<span className="text-sm font-normal text-gray-500">/mo</span>
                     </span>
@@ -172,7 +202,12 @@ export default function BillingPage({ session, onBack, checkoutStatus }) {
                     <span className="text-2xl font-bold text-[#2D2D31]">Custom</span>
                   )}
                 </div>
-                <p className="text-xs text-gray-500 mt-1">{tier.storage} included · Overage: {tier.overage}</p>
+                <p className="text-xs text-gray-500 mt-1">
+                  {tier.storage} included{tier.overage ? ` · Overage: ${tier.overage}` : ''}
+                </p>
+                {tier.tagline && (
+                  <p className="text-xs text-green-600 mt-1 font-medium">{tier.tagline}</p>
+                )}
               </div>
 
               <ul className="space-y-1 flex-1">
@@ -185,15 +220,21 @@ export default function BillingPage({ session, onBack, checkoutStatus }) {
 
               <button
                 onClick={() => handleSubscribe(tier.price_id, tier.name)}
-                disabled={isCurrent || isLoading}
+                disabled={isCurrent || isLoading || tier.price === 0}
                 className={`w-full py-2 rounded-md text-sm font-medium transition-colors ${
                   isCurrent
                     ? 'bg-gray-200 text-gray-500 cursor-default'
+                    : tier.price === 0
+                    ? 'bg-gray-100 text-gray-400 cursor-default'
                     : tier.highlight
                     ? 'bg-[#FD366E] text-white hover:bg-[#e02d60]'
                     : 'bg-[#2D2D31] text-white hover:bg-black'
                 }`}>
-                {isCurrent ? 'Current Plan' : isLoading ? 'Redirecting…' : tier.name === 'Enterprise' ? 'Contact Us' : 'Subscribe'}
+                {isCurrent ? 'Current Plan'
+                  : isLoading ? 'Redirecting…'
+                  : tier.price === 0 ? 'Free Forever'
+                  : tier.name === 'Enterprise' ? 'Contact Us'
+                  : 'Subscribe'}
               </button>
             </div>
           );
