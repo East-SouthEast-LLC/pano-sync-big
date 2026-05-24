@@ -184,7 +184,7 @@ export default function BillingPage({ session, onBack, checkoutStatus }) {
                 </div>
               )}
               {tier.highlight && !tier.badge && (
-                <div className="h-4" /> {/* spacer to keep card heights aligned */}
+                <div className="h-4" />
               )}
 
               <div>
