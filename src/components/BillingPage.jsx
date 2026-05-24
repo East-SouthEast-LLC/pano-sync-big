@@ -170,7 +170,7 @@ export default function BillingPage({ session, onBack, checkoutStatus }) {
         {TIERS.map(tier => {
           const isCurrent = currentTierName?.toLowerCase() === tier.name.toLowerCase();
           const isFree    = tier.price === 0;
-          const isLoading = checkingOut === tier.price_id;
+		  const isLoading = tier.price_id !== null && checkingOut === tier.price_id;
 
           return (
             <div key={tier.name}
