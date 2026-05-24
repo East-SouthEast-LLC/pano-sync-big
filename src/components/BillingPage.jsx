@@ -15,6 +15,7 @@ const TIERS = [
     badge: 'No credit card required',
     badgeStyle: 'text-gray-500',
     tagline: null,
+    highlight: false,
   },
   {
     name: 'Starter',
@@ -26,6 +27,7 @@ const TIERS = [
     badge: 'Start Here',
     badgeStyle: 'text-green-600',
     tagline: 'Your plan grows automatically as you add data.',
+    highlight: true,
   },
   {
     name: 'Professional',
@@ -34,7 +36,7 @@ const TIERS = [
     overage: '$0.75 / GB',
     price_id: 'price_1Ta5LyLw1WmTSYroTldqSRuQ',
     features: ['40 GB storage', 'Map viewer access', 'Share links', 'Access codes'],
-    highlight: true,
+    highlight: false,
     badge: null,
     tagline: null,
   },
@@ -47,6 +49,7 @@ const TIERS = [
     features: ['100 GB storage', 'Map viewer access', 'Share links', 'Access codes'],
     badge: null,
     tagline: null,
+    highlight: false,
   },
   {
     name: 'Enterprise',
@@ -57,15 +60,15 @@ const TIERS = [
     features: ['500 GB+ storage', 'Custom pricing', 'Priority support', 'Custom onboarding'],
     badge: null,
     tagline: null,
+    highlight: false,
   },
 ];
 
 export default function BillingPage({ session, onBack, checkoutStatus }) {
   const [subscription, setSubscription] = useState(null);
   const [loading, setLoading]           = useState(true);
-  const [checkingOut, setCheckingOut]   = useState(null); // price_id being processed
+  const [checkingOut, setCheckingOut]   = useState(null);
 
-  // Load current subscription from Supabase
   useEffect(() => {
     async function loadSub() {
       setLoading(true);
@@ -85,8 +88,7 @@ export default function BillingPage({ session, onBack, checkoutStatus }) {
       window.location.href = 'mailto:info@ese-llc.com?subject=Enterprise Subscription Inquiry';
       return;
     }
-
-    if (!price_id) return; // Free tier — no action needed
+    if (!price_id) return;
 
     setCheckingOut(price_id);
     try {
@@ -110,7 +112,7 @@ export default function BillingPage({ session, onBack, checkoutStatus }) {
       }
 
       const { url } = await res.json();
-      window.location.href = url; // redirect to Stripe Checkout
+      window.location.href = url;
     } catch (err) {
       alert(`Error: ${err.message}`);
       setCheckingOut(null);
@@ -164,36 +166,36 @@ export default function BillingPage({ session, onBack, checkoutStatus }) {
       )}
 
       {/* Pricing cards */}
-      <div className="w-full grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+      <div className="w-full grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 items-start">
         {TIERS.map(tier => {
           const isCurrent = currentTierName?.toLowerCase() === tier.name.toLowerCase();
+          const isFree    = tier.price === 0;
           const isLoading = checkingOut === tier.price_id;
 
           return (
             <div key={tier.name}
               className={`flex flex-col rounded-xl border p-5 space-y-4 ${
                 tier.highlight
-                  ? 'border-[#FD366E] shadow-md bg-white'
+                  ? 'border-[#2D2D31] shadow-md bg-white'
+                  : isCurrent
+                  ? 'border-blue-300 bg-blue-50'
                   : 'border-gray-200 bg-gray-50'
               }`}>
 
-              {/* Badge */}
-              {tier.badge && (
-                <div className={`text-xs font-semibold uppercase tracking-wide ${tier.badgeStyle}`}>
-                  {tier.badge}
-                </div>
-              )}
-              {tier.highlight && !tier.badge && (
-                <div className="h-4" />
-              )}
+              {/* Badge row — always rendered to keep alignment */}
+              <div className="h-4">
+                {tier.badge && (
+                  <span className={`text-xs font-semibold uppercase tracking-wide ${tier.badgeStyle}`}>
+                    {tier.badge}
+                  </span>
+                )}
+              </div>
 
               <div>
                 <h2 className="text-lg font-bold text-[#2D2D31]">{tier.name}</h2>
                 <div className="mt-1">
-                  {tier.price === 0 ? (
-                    <span className="text-2xl font-bold text-[#2D2D31]">
-                      Free
-                    </span>
+                  {isFree ? (
+                    <span className="text-2xl font-bold text-[#2D2D31]">Free</span>
                   ) : tier.price !== null ? (
                     <span className="text-2xl font-bold text-[#2D2D31]">
                       ${tier.price}<span className="text-sm font-normal text-gray-500">/mo</span>
@@ -220,25 +222,40 @@ export default function BillingPage({ session, onBack, checkoutStatus }) {
 
               <button
                 onClick={() => handleSubscribe(tier.price_id, tier.name)}
-                disabled={isCurrent || isLoading || tier.price === 0}
+                disabled={isCurrent || isLoading || isFree}
                 className={`w-full py-2 rounded-md text-sm font-medium transition-colors ${
                   isCurrent
                     ? 'bg-gray-200 text-gray-500 cursor-default'
-                    : tier.price === 0
+                    : isFree
                     ? 'bg-gray-100 text-gray-400 cursor-default'
+                    : isLoading
+                    ? 'bg-gray-300 text-gray-500 cursor-default'
                     : tier.highlight
-                    ? 'bg-[#FD366E] text-white hover:bg-[#e02d60]'
+                    ? 'bg-[#2D2D31] text-white hover:bg-black'
                     : 'bg-[#2D2D31] text-white hover:bg-black'
                 }`}>
                 {isCurrent ? 'Current Plan'
                   : isLoading ? 'Redirecting…'
-                  : tier.price === 0 ? 'Free Forever'
+                  : isFree ? 'Free Forever'
                   : tier.name === 'Enterprise' ? 'Contact Us'
                   : 'Subscribe'}
               </button>
             </div>
           );
         })}
+      </div>
+
+      {/* Auto-upgrade note */}
+      <div className="w-full px-4 py-3 rounded-md bg-gray-50 border border-gray-200 text-gray-500 text-xs space-y-1">
+        <p>
+          <span className="font-medium text-gray-700">Your plan adjusts automatically</span> — it upgrades as you add images and downgrades as you remove them. Here are the ranges:
+        </p>
+        <ul className="mt-1 space-y-0.5 pl-2">
+          <li>· <span className="text-gray-700 font-medium">10–39 GB</span> — Starter ($10–$39/mo)</li>
+          <li>· <span className="text-gray-700 font-medium">40–66 GB</span> — Professional ($40–$49.50/mo)</li>
+          <li>· <span className="text-gray-700 font-medium">67–400 GB</span> — Business ($50–$100/mo)</li>
+          <li>· <span className="text-gray-700 font-medium">400+ GB</span> — Enterprise (custom pricing, we'll reach out)</li>
+        </ul>
       </div>
 
       {/* Dormant note */}
