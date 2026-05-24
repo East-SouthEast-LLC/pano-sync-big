@@ -285,15 +285,56 @@ function App() {
       }
       if (cancelledRef.current) return;
 
+      // ── Free tier gate ──────────────────────────────────────────────────
+      const FREE_LIMIT_BYTES = 500 * 1024 * 1024; // 500 MB
+      let isPartial = false;
+      let userTier  = 'free';
+
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('subscription_tier, storage_available_mb')
+        .eq('id', session.user.id)
+        .maybeSingle();
+
+      if (profile) userTier = profile.subscription_tier || 'free';
+
+      let filesToUpload = renamedImages;
+      let uploadedBytes = 0;
+
+      if (userTier === 'free') {
+        let runningTotal = 0;
+        const capped = [];
+        for (const file of renamedImages) {
+          if (runningTotal + file.size > FREE_LIMIT_BYTES) {
+            isPartial = true;
+            break;
+          }
+          runningTotal += file.size;
+          capped.push(file);
+        }
+        filesToUpload = capped;
+        uploadedBytes = runningTotal;
+      } else {
+        uploadedBytes = renamedImages.reduce((sum, f) => sum + f.size, 0);
+      }
+
+      if (filesToUpload.length === 0) {
+        throw new Error('No files fit within your 500 MB free tier limit. Upgrade to upload this project.');
+      }
+
       setStage(STAGES.UPLOADING);
-      setUploadProgress({ done: 0, total: renamedImages.length });
+      setUploadProgress({ done: 0, total: filesToUpload.length });
       const urlMap = await uploadFilesToR2(
-        renamedImages, folder,
+        filesToUpload, folder,
         (_, status) => { if (status === 'done') setUploadProgress(p => ({ ...p, done: p.done + 1 })); }
       );
       if (cancelledRef.current) return;
 
       setStage(STAGES.GEOJSON);
+      const descriptionFinal = isPartial
+        ? `${projectDescription ? projectDescription + ' — ' : ''}Partial upload — free tier limit reached. Upgrade to complete.`
+        : projectDescription;
+
       const { projectGeoJson, wgs84Points } = buildProjectGeoJson(rows, processingPrefix, resolvedCode, swapXY, urlMap);
       await uploadProjectGeoJsonToR2(folder, projectGeoJson);
       if (cancelledRef.current) return;
@@ -301,17 +342,39 @@ function App() {
       setStage(STAGES.INDEX);
       const metadata = {
         name: projectName || folder, town: projectTown,
-        owner: projectOwner || 'ESE LLC', description: projectDescription,
+        owner: projectOwner || 'ESE LLC', description: descriptionFinal,
       };
       const newFeature = buildIndexFeature(folder, projectGeoJson.features.length, wgs84Points, metadata, getPublicUrl());
       const finalIndex = mergeIndexFeature(masterIndex, newFeature);
       const indexUrl   = await uploadIndexToR2(finalIndex);
       if (cancelledRef.current) return;
 
+      // ── Write project record to Supabase ────────────────────────────────
+      await supabase.from('projects').insert({
+        project_name:    projectName || folder,
+        description:     descriptionFinal,
+        location:        projectTown || null,
+        user_id:         session.user.id,
+        image_count:     filesToUpload.length,
+        storage_used_mb: Math.round(uploadedBytes / (1024 * 1024)),
+        is_partial:      isPartial,
+        uploaded_bytes:  uploadedBytes,
+        tier_at_upload:  userTier,
+        status:          'active',
+        is_public:       false,
+      });
+
       setMasterIndex(finalIndex);
       setResultUrl(indexUrl);
       setCoordCheck(null);
       setStage(STAGES.DONE);
+
+      // ── Partial upload prompt ────────────────────────────────────────────
+      if (isPartial) {
+        setErrorMessage(
+          'You have reached the 500 MB free tier limit. Your project is on the map — explore it and see if it meets your needs. Return and upgrade your plan to upload the remaining images.'
+        );
+      }
 
     } catch (err) {
       if (!cancelledRef.current) {
@@ -448,6 +511,17 @@ function App() {
             <p className="text-sm font-semibold text-green-700 mb-1">✓ All done!</p>
             <a href={resultUrl} target="_blank" rel="noreferrer"
               className="text-xs text-blue-600 underline break-all">{resultUrl}</a>
+          </div>
+        )}
+        {isDone && errorMessage && (
+          <div className="rounded-md bg-yellow-50 border border-yellow-200 p-3">
+            <p className="text-sm font-semibold text-yellow-700 mb-1">⚠ Partial upload</p>
+            <p className="text-xs text-yellow-700">{errorMessage}</p>
+            <button
+              onClick={() => setPage('billing')}
+              className="mt-2 text-xs px-3 py-1 rounded-md bg-yellow-600 text-white hover:bg-yellow-700 transition-colors">
+              Upgrade plan →
+            </button>
           </div>
         )}
         {isCancelled && (
