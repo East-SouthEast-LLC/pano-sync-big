@@ -251,8 +251,8 @@ export default function BillingPage({ session, onBack, checkoutStatus }) {
           <span className="font-medium text-gray-700">Your plan adjusts automatically</span> — it upgrades as you add images and downgrades as you remove them. Here are the ranges:
         </p>
         <ul className="mt-1 space-y-0.5 pl-2">
-          <li>· <span className="text-gray-700 font-medium">10–39 GB</span> — Starter ($10–$39/mo)</li>
-          <li>· <span className="text-gray-700 font-medium">40–66 GB</span> — Professional ($40–$49.50/mo)</li>
+          <li>· <span className="text-gray-700 font-medium">10–29 GB</span> — Starter ($10–$29/mo)</li>
+          <li>· <span className="text-gray-700 font-medium">30–66 GB</span> — Professional ($30–$49.50/mo)</li>
           <li>· <span className="text-gray-700 font-medium">67–400 GB</span> — Business ($50–$100/mo)</li>
           <li>· <span className="text-gray-700 font-medium">400+ GB</span> — Enterprise (custom pricing, we'll reach out)</li>
         </ul>
