@@ -57,7 +57,7 @@ const TIERS = [
     storage: '500 GB+',
     overage: 'Custom',
     price_id: 'price_1Ta5RnLw1WmTSYrousgfDOYu',
-    features: ['500 GB+ storage', 'Custom pricing', 'Priority support', 'Custom onboarding'],
+    features: ['500 GB+ storage', 'Custom pricing', 'Priority support', 'Dedicated map page'],
     badge: null,
     tagline: null,
     highlight: false,
