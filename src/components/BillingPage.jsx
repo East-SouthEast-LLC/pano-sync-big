@@ -53,7 +53,7 @@ export default function BillingPage({ session, onBack, checkoutStatus }) {
         .from('subscriptions')
         .select('*')
         .eq('user_id', session.user.id)
-        .single();
+        .maybeSingle();
       if (!error && data) setSubscription(data);
       setLoading(false);
     }
