@@ -70,6 +70,7 @@ function App() {
   const [errorMessage, setErrorMessage]       = useState(null);
 
   const [coordCheck, setCoordCheck] = useState(null);
+  const [projFilter, setProjFilter] = useState('');
 
   const pendingPipelineRef = useRef(null);
   const cancelledRef       = useRef(false);
@@ -663,18 +664,32 @@ function App() {
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Coordinate System <span className="text-red-500">*</span>
               </label>
+              <input
+                type="text"
+                placeholder="Type to filter (e.g. 6491)"
+                value={projFilter ?? ''}
+                onChange={e => setProjFilter(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-pink-300 mb-1"
+              />
               <select
+                size={6}
                 value={projCode}
                 onChange={e => setProjCode(e.target.value)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-pink-300 bg-white"
               >
-                <option value="" disabled>Select Project EPSG or Auto-Detect</option>
                 <option value={AUTO_DETECT_CODE}>AUTO — Auto-detect from coordinates</option>
-                {PROJECTIONS.map(p => (
-                  <option key={p.code} value={p.code}>
-                    {p.code} — {p.label.split('—')[1]?.trim() ?? p.label}
-                  </option>
-                ))}
+                {[...PROJECTIONS]
+                  .sort((a, b) => {
+                    const na = parseInt(a.code.replace('EPSG:', ''));
+                    const nb = parseInt(b.code.replace('EPSG:', ''));
+                    return na - nb;
+                  })
+                  .filter(p => !projFilter || p.label.toLowerCase().includes(projFilter.toLowerCase()) || p.code.includes(projFilter))
+                  .map(p => (
+                    <option key={p.code} value={p.code}>
+                      {p.label}
+                    </option>
+                  ))}
               </select>
             </div>
 
