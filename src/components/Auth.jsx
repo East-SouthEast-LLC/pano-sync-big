@@ -15,9 +15,18 @@ export default function Auth() {
     setError(null);
 
     if (isSignUp) {
-      const { error } = await supabase.auth.signUp({ email, password });
-      if (error) setError(error.message);
-      else setMessage('Check your email to confirm your account.');
+      const { data, error } = await supabase.auth.signUp({ email, password });
+      if (error) {
+        setError(error.message);
+      } else {
+        setMessage('Check your email to confirm your account.');
+        // Send welcome email — fire and forget
+        fetch('https://ayktuzidcoolddlphqia.supabase.co/functions/v1/send-email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'welcome', to: email, data: {} }),
+        }).catch(() => {});
+      }
     } else {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) setError(error.message);

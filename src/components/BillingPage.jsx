@@ -68,6 +68,11 @@ export default function BillingPage({ session, onBack, checkoutStatus }) {
   const [subscription, setSubscription] = useState(null);
   const [loading, setLoading]           = useState(true);
   const [checkingOut, setCheckingOut]   = useState(null);
+  const [portalLoading, setPortalLoading] = useState(false);
+  const [deleteModal, setDeleteModal]   = useState(false);
+  const [deleteInput, setDeleteInput]   = useState('');
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [deleteError, setDeleteError]   = useState(null);
 
   useEffect(() => {
     async function loadSub() {
@@ -119,6 +124,45 @@ export default function BillingPage({ session, onBack, checkoutStatus }) {
     }
   };
 
+  const handlePortal = async () => {
+    setPortalLoading(true);
+    try {
+      const { data: { session: authSession } } = await supabase.auth.getSession();
+      const token = authSession?.access_token;
+      const res = await fetch(`${WORKER_URL}/stripe/portal`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const { url } = await res.json();
+      window.open(url, '_blank');
+    } catch (err) {
+      alert(`Portal error: ${err.message}`);
+    } finally {
+      setPortalLoading(false);
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    if (deleteInput !== 'DELETE') return;
+    setDeleteLoading(true);
+    setDeleteError(null);
+    try {
+      const { data: { session: authSession } } = await supabase.auth.getSession();
+      const token = authSession?.access_token;
+      const res = await fetch(`${WORKER_URL}/account/delete`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error(await res.text());
+      // Sign out after scheduling deletion
+      await supabase.auth.signOut();
+    } catch (err) {
+      setDeleteError(err.message);
+      setDeleteLoading(false);
+    }
+  };
+
   const currentTierName = subscription?.tier
     ? subscription.tier.charAt(0).toUpperCase() + subscription.tier.slice(1)
     : 'Free';
@@ -149,14 +193,22 @@ export default function BillingPage({ session, onBack, checkoutStatus }) {
 
       {/* Current subscription */}
       {!loading && subscription && (
-        <div className="w-full px-4 py-3 rounded-md bg-blue-50 border border-blue-200 text-blue-700 text-sm">
-          Current plan: <span className="font-semibold">{currentTierName}</span>
-          {' · '}Status: <span className="font-semibold">{subscription.status}</span>
-          {subscription.current_period_end && (
-            <span className="ml-2 text-blue-500">
-              · Renews {new Date(subscription.current_period_end).toLocaleDateString()}
-            </span>
-          )}
+        <div className="w-full px-4 py-3 rounded-md bg-blue-50 border border-blue-200 text-blue-700 text-sm flex items-center justify-between gap-4 flex-wrap">
+          <span>
+            Current plan: <span className="font-semibold">{currentTierName}</span>
+            {' · '}Status: <span className="font-semibold">{subscription.status}</span>
+            {subscription.current_period_end && (
+              <span className="ml-2 text-blue-500">
+                · Renews {new Date(subscription.current_period_end).toLocaleDateString()}
+              </span>
+            )}
+          </span>
+          <button
+            onClick={handlePortal}
+            disabled={portalLoading}
+            className="text-xs px-3 py-1.5 rounded-md border border-blue-300 text-blue-600 hover:bg-blue-100 transition-colors disabled:opacity-50 whitespace-nowrap">
+            {portalLoading ? 'Loading…' : 'Manage / Cancel →'}
+          </button>
         </div>
       )}
       {!loading && !subscription && (
@@ -262,6 +314,69 @@ export default function BillingPage({ session, onBack, checkoutStatus }) {
       <div className="w-full px-4 py-3 rounded-md bg-gray-50 border border-gray-200 text-gray-500 text-xs">
         <span className="font-medium text-gray-700">Dormant projects</span> — keep images in storage at $0.25/GB/month with the map shape hidden. Useful for archiving completed projects or pausing visibility without losing data.
       </div>
+
+      {/* ── Danger zone ── */}
+      <div className="w-full px-4 py-4 rounded-md border border-red-200 bg-red-50 space-y-2">
+        <p className="text-sm font-semibold text-red-700">Danger Zone</p>
+        <p className="text-xs text-red-500 leading-relaxed">
+          Deleting your account will schedule all projects and images for permanent deletion.
+          You will have 30 days before data is removed, with email notifications along the way.
+          This cannot be undone.
+        </p>
+        <button
+          onClick={() => { setDeleteModal(true); setDeleteInput(''); setDeleteError(null); }}
+          className="text-xs px-3 py-1.5 rounded-md border border-red-400 text-red-600 hover:bg-red-100 transition-colors">
+          Delete Account & All Data
+        </button>
+      </div>
+
+      {/* ── Delete confirmation modal ── */}
+      {deleteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+          <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-sm mx-4 space-y-4">
+            <h2 className="text-lg font-bold text-red-700">Delete Account</h2>
+            <p className="text-sm text-gray-700 leading-relaxed">
+              This will permanently delete <span className="font-semibold">all your projects and images</span>.
+              Your data will remain accessible for 30 days, then be permanently removed.
+            </p>
+            <ul className="text-xs text-gray-500 space-y-1 pl-2">
+              <li>· Day 0 — account marked for deletion, confirmation email sent</li>
+              <li>· Day 7 — projects go offline (hidden from map)</li>
+              <li>· Day 30 — final warning email</li>
+              <li>· Day 37 — all images and data permanently deleted</li>
+            </ul>
+            <div className="space-y-2">
+              <label className="block text-xs font-medium text-gray-700">
+                Type <span className="font-mono font-bold text-red-600">DELETE</span> to confirm
+              </label>
+              <input
+                type="text"
+                value={deleteInput}
+                onChange={e => setDeleteInput(e.target.value)}
+                placeholder="DELETE"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm font-mono focus:outline-none focus:ring-2 focus:ring-red-300"
+              />
+            </div>
+            {deleteError && (
+              <p className="text-xs text-red-600">⚠ {deleteError}</p>
+            )}
+            <div className="flex gap-3 justify-end pt-1">
+              <button
+                onClick={() => setDeleteModal(false)}
+                disabled={deleteLoading}
+                className="text-sm px-4 py-2 rounded-md border border-gray-300 text-gray-600 hover:bg-gray-100 transition-colors">
+                Cancel
+              </button>
+              <button
+                onClick={handleDeleteAccount}
+                disabled={deleteInput !== 'DELETE' || deleteLoading}
+                className="text-sm px-4 py-2 rounded-md bg-red-600 text-white font-medium hover:bg-red-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+                {deleteLoading ? 'Processing…' : 'Delete Everything'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </main>
   );
