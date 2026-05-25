@@ -90,7 +90,6 @@ function App() {
       window.history.replaceState({}, '', window.location.pathname);
     }
 
-    // Restore session from URL token (passed from panoramap)
     const tokenParam = new URLSearchParams(window.location.search).get('token');
     const initSession = async () => {
       if (tokenParam) {
@@ -345,7 +344,9 @@ function App() {
         : projectDescription;
 
       const { projectGeoJson, wgs84Points } = buildProjectGeoJson(rows, processingPrefix, resolvedCode, swapXY, urlMap);
-      await uploadProjectGeoJsonToR2(folder, projectGeoJson);
+      const { data: { session: uploadSession } } = await supabase.auth.getSession();
+      const authToken = uploadSession?.access_token;
+      await uploadProjectGeoJsonToR2(folder, projectGeoJson, authToken);
       if (cancelledRef.current) return;
 
       setStage(STAGES.INDEX);
@@ -355,7 +356,7 @@ function App() {
       };
       const newFeature = buildIndexFeature(folder, projectGeoJson.features.length, wgs84Points, metadata, getPublicUrl());
       const finalIndex = mergeIndexFeature(masterIndex, newFeature);
-      const indexUrl   = await uploadIndexToR2(finalIndex);
+      const indexUrl   = await uploadIndexToR2(finalIndex, authToken);
       if (cancelledRef.current) return;
 
       // ── Write project record to Supabase ────────────────────────────────
