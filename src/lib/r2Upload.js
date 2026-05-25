@@ -139,7 +139,7 @@ export const getPublicUrl = () => PUBLIC_URL;
  * Returns an empty FeatureCollection if not yet created.
  */
 export const fetchIndexFromR2 = async () => {
-  const url      = `${PUBLIC_URL}/pano_index.geojson?nocache=${Date.now()}`;
+  const url = `${WORKER_ENDPOINT}/get/pano_index.geojson?nocache=${Date.now()}`;
   const response = await fetch(url);
   if (response.status === 404) {
     console.warn('pano_index.geojson not found in R2 — starting fresh.');
