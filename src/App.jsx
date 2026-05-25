@@ -89,9 +89,17 @@ function App() {
       window.history.replaceState({}, '', window.location.pathname);
     }
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    // Restore session from URL token (passed from panoramap)
+    const tokenParam = new URLSearchParams(window.location.search).get('token');
+    const initSession = async () => {
+      if (tokenParam) {
+        await supabase.auth.setSession({ access_token: tokenParam, refresh_token: '' });
+        window.history.replaceState({}, '', window.location.pathname);
+      }
+      const { data: { session } } = await supabase.auth.getSession();
       setSession(session);
-    });
+    };
+    initSession();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
