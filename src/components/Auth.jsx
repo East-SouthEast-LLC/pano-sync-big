@@ -33,8 +33,11 @@ export default function Auth() {
         setMessage('Check your email to confirm your account.');
         fetch('https://ayktuzidcoolddlphqia.supabase.co/functions/v1/send-email', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type: 'welcome', to: email, data: {} }),
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF5a3R1emlkY29vbGRkbHBocWlhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkwMzQ3OTksImV4cCI6MjA5NDYxMDc5OX0.m9Ymo-ZQ1U8QtHoeXwHMwBaowqBiYoeDiuqTCDmfGwo',
+          },
+          body: JSON.stringify({ type: 'welcome', to: email, data: { name: fullName } }),
         }).catch(() => {});
       }
     } else {
@@ -48,7 +51,7 @@ export default function Auth() {
   return (
     <div className="flex flex-col items-center justify-center min-h-screen p-5">
       <div className="w-full max-w-sm border rounded-xl p-6 bg-white shadow-md space-y-4">
-        <h1 className="text-2xl font-bold text-[#2D2D31]">Pano Sync</h1>
+        <h1 className="text-2xl font-bold text-[#2D2D31]">panoramap</h1>
         <p className="text-sm text-gray-500">{isSignUp ? 'Create an account' : 'Sign in to continue'}</p>
 
         {isSignUp && (
