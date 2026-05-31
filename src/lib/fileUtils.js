@@ -182,7 +182,7 @@ export const buildProjectGeoJson = (rows, prefix, projCode, swapXY = false, urlM
 /**
  * Builds a GeoJSON Feature for the master index (pano_index.geojson).
  */
-export const buildIndexFeature = (folder, imageCount, wgs84Points, metadata, publicUrl) => {
+export const buildIndexFeature = (folder, imageCount, wgs84Points, metadata, publicUrl, ownerId) => {
   const hullCoords = convexHull(wgs84Points);
   const center     = centroid(wgs84Points);
 
@@ -209,6 +209,7 @@ export const buildIndexFeature = (folder, imageCount, wgs84Points, metadata, pub
       centroid:    center,
       data_url:    `${publicUrl}/${folder}/pano_data.geojson`,
       private:     false,
+      owner_id:    ownerId || null,
     },
   };
 };

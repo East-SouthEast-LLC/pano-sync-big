@@ -366,7 +366,7 @@ function App() {
         name: projectName || folder, town: projectTown,
         owner: projectOwner || 'ESE LLC', description: descriptionFinal,
       };
-      const newFeature = buildIndexFeature(folder, projectGeoJson.features.length, wgs84Points, metadata, getPublicUrl());
+      const newFeature = buildIndexFeature(folder, projectGeoJson.features.length, wgs84Points, metadata, getPublicUrl(), session.user.id);
       const finalIndex = mergeIndexFeature(masterIndex, newFeature);
       const indexUrl   = await uploadIndexToR2(finalIndex, authToken);
       if (cancelledRef.current) return;
