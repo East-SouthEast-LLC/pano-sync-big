@@ -112,7 +112,19 @@ function App() {
   useEffect(() => {
     if (!session) return;
     fetchIndexFromR2()
-      .then(data => setMasterIndex(data))
+      .then(async (data) => {
+        // Filter to only this user's projects via Supabase
+        const { data: rows } = await supabase
+          .from('projects')
+          .select('project_name')
+          .eq('user_id', session.user.id);
+        const ownedNames = new Set((rows || []).map(r => r.project_name));
+        const filtered = {
+          ...data,
+          features: data.features.filter(f => ownedNames.has(f.properties.name)),
+        };
+        setMasterIndex(filtered);
+      })
       .catch(err => {
         console.error('Could not load pano_index.geojson from R2:', err);
         setIndexLoadError(err.message);
