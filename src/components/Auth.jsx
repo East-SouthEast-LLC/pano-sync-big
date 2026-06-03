@@ -4,6 +4,8 @@ import { supabase } from '../lib/supabaseClient';
 export default function Auth() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [fullName, setFullName] = useState('');
+  const [companyName, setCompanyName] = useState('');
   const [isSignUp, setIsSignUp] = useState(false);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState(null);
@@ -15,16 +17,27 @@ export default function Auth() {
     setError(null);
 
     if (isSignUp) {
-      const { data, error } = await supabase.auth.signUp({ email, password });
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            full_name: fullName,
+            company_name: companyName,
+          }
+        }
+      });
       if (error) {
         setError(error.message);
       } else {
         setMessage('Check your email to confirm your account.');
-        // Send welcome email — fire and forget
         fetch('https://ayktuzidcoolddlphqia.supabase.co/functions/v1/send-email', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type: 'welcome', to: email, data: {} }),
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF5a3R1emlkY29vbGRkbHBocWlhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkwMzQ3OTksImV4cCI6MjA5NDYxMDc5OX0.m9Ymo-ZQ1U8QtHoeXwHMwBaowqBiYoeDiuqTCDmfGwo',
+          },
+          body: JSON.stringify({ type: 'welcome', to: email, data: { name: fullName } }),
         }).catch(() => {});
       }
     } else {
@@ -38,8 +51,20 @@ export default function Auth() {
   return (
     <div className="flex flex-col items-center justify-center min-h-screen p-5">
       <div className="w-full max-w-sm border rounded-xl p-6 bg-white shadow-md space-y-4">
-        <h1 className="text-2xl font-bold text-[#2D2D31]">Pano Sync</h1>
+        <h1 className="text-2xl font-bold text-[#2D2D31]">panoramap</h1>
         <p className="text-sm text-gray-500">{isSignUp ? 'Create an account' : 'Sign in to continue'}</p>
+
+        {isSignUp && (
+          <>
+            <input type="text" placeholder="Full Name" value={fullName}
+              onChange={e => setFullName(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-pink-300" />
+
+            <input type="text" placeholder="Company Name" value={companyName}
+              onChange={e => setCompanyName(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-pink-300" />
+          </>
+        )}
 
         <input type="email" placeholder="Email" value={email}
           onChange={e => setEmail(e.target.value)}
