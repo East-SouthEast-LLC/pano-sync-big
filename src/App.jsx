@@ -74,6 +74,14 @@ function App() {
 
   const pendingPipelineRef = useRef(null);
   const cancelledRef       = useRef(false);
+  const selectRef          = useRef(null);
+
+  // ── Scroll select to projCode when it changes ────────────────────────────
+  useEffect(() => {
+    if (!selectRef.current || !projCode) return;
+    const opt = Array.from(selectRef.current.options).find(o => o.value === projCode);
+    if (opt) opt.scrollIntoView({ block: 'nearest' });
+  }, [projCode]);
 
   // ── Auth ─────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -679,12 +687,21 @@ function App() {
               </label>
               <input
                 type="text"
-                placeholder="Type to filter (e.g. 6491)"
+                placeholder="Type to jump (e.g. 6491)"
                 value={projFilter ?? ''}
-                onChange={e => setProjFilter(e.target.value)}
+                onChange={e => {
+                  const val = e.target.value;
+                  setProjFilter(val);
+                  if (!val) return;
+                  const match = [...PROJECTIONS]
+                    .sort((a, b) => parseInt(a.code.replace('EPSG:', '')) - parseInt(b.code.replace('EPSG:', '')))
+                    .find(p => p.code.includes(val) || p.label.toLowerCase().includes(val.toLowerCase()));
+                  if (match) setProjCode(match.code);
+                }}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-pink-300 mb-1"
               />
               <select
+                ref={selectRef}
                 size={6}
                 value={projCode}
                 onChange={e => setProjCode(e.target.value)}
@@ -697,7 +714,6 @@ function App() {
                     const nb = parseInt(b.code.replace('EPSG:', ''));
                     return na - nb;
                   })
-                  .filter(p => !projFilter || p.label.toLowerCase().includes(projFilter.toLowerCase()) || p.code.includes(projFilter))
                   .map(p => (
                     <option key={p.code} value={p.code}>
                       {p.label}
