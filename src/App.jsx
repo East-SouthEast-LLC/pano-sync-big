@@ -603,10 +603,6 @@ function App() {
           <h1 className="text-3xl font-bold">Pano Sync Processor</h1>
           <div className="flex items-center gap-3">
             <span className="text-xs text-gray-500">{session.user.email}</span>
-            <button onClick={() => window.open('https://east-southeast-llc.github.io/pano-sync-big/?billing=true', '_blank')}
-              className="text-xs px-3 py-1 rounded-md border border-gray-300 text-gray-600 hover:bg-gray-100 transition-colors">
-              Billing
-            </button>
             <button onClick={handleSignOut}
               className="text-xs px-3 py-1 rounded-md border border-gray-300 text-gray-600 hover:bg-gray-100 transition-colors">
               Sign out
